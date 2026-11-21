@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import re
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, Response
@@ -295,7 +296,8 @@ def api_batch_overview(course_id):
                             
                             recent_lectures.append({
                                 "id": str(item.get("id")),
-                                "title": item.get("Title") or item.get("title") or "लेक्चर",
+                                "course_id": str(course_id),
+                                "title": item.get("Title") or item.get("title") or "Lecture",
                                 "thumbnail": item.get("thumbnail") or "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png",
                                 "video_id": dec_id,
                                 "ytFlag": int(item.get("ytFlag", 0) or item.get("ytFlagWeb", 0)),
@@ -461,15 +463,79 @@ def api_batch_video_details(course_id, video_id):
             if not hls_stream and data.get("recording_hls"):
                 hls_stream = data.get("recording_hls")
         
+        # If stream is from classx CDN requiring referer, route through backend proxy
+        final_hls = hls_stream
+        if hls_stream and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):
+            final_hls = f"/api/proxy-hls?url={requests.utils.quote(hls_stream)}"
+
         return jsonify({
             "status": 200,
             "video_id": yt_id,
-            "hls_url": hls_stream,
-            "ytFlag": yt_flag,
-            "debug_data": data
+            "hls_url": final_hls,
+            "raw_hls_url": hls_stream,
+            "ytFlag": yt_flag
         })
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500
+
+@app.route("/api/proxy-hls", methods=["GET"])
+def proxy_hls():
+    """Proxies HLS .m3u8 playlists and .tsc chunks with required Appx Referer headers"""
+    target_url = request.args.get("url")
+    if not target_url:
+        return "Missing URL", 400
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": "https://player.appx.co.in/"
+    }
+    
+    try:
+        r = requests.get(target_url, headers=headers, stream=True, timeout=20)
+        content_type = r.headers.get("Content-Type", "")
+        
+        # If it's an m3u8 playlist, rewrite keys and media segments to pass through proxy
+        if ".m3u8" in target_url.lower() or "mpegurl" in content_type.lower():
+            lines = r.text.splitlines()
+            base_url = target_url.rsplit("/", 1)[0] + "/"
+            rewritten_lines = []
+            
+            for line in lines:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                if line_str.startswith("#EXT-X-KEY"):
+                    def replace_key_uri(match):
+                        raw_uri = match.group(1)
+                        full_uri = raw_uri if raw_uri.startswith("http") else base_url + raw_uri
+                        proxy_uri = f"/api/proxy-hls?url={requests.utils.quote(full_uri)}"
+                        return f'URI="{proxy_uri}"'
+                    new_line = re.sub(r'URI="([^"]+)"', replace_key_uri, line_str)
+                    rewritten_lines.append(new_line)
+                elif line_str.startswith("#"):
+                    rewritten_lines.append(line_str)
+                else:
+                    # Media segment URL
+                    full_chunk = line_str if line_str.startswith("http") else base_url + line_str
+                    proxy_chunk = f"/api/proxy-hls?url={requests.utils.quote(full_chunk)}"
+                    rewritten_lines.append(proxy_chunk)
+            
+            manifest = "\n".join(rewritten_lines)
+            resp = Response(manifest, status=200, mimetype="application/vnd.apple.mpegurl")
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+        else:
+            # Video chunk / key data
+            def generate():
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            resp = Response(generate(), status=r.status_code, content_type=content_type or "application/octet-stream")
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/check-pdf", methods=["GET"])
 def check_pdf():

@@ -584,11 +584,17 @@ export default function App() {
     // If stream URL is not yet present, dynamically resolve via backend
     if (!playVideo.video_id && !playVideo.hls_url && (selectedBatch?.id || video.course_id)) {
       try {
-        const cId = selectedBatch?.id || video.course_id;
+        const cId = selectedBatch?.id || video.course_id || '65';
+        showToast('🔄 Connecting class stream...');
         const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}`).then(r => r.json());
         if (res && res.status === 200) {
+          let hls = res.hls_url || '';
+          if (hls && hls.startsWith('/api')) {
+            const root = API_BASE_URL.replace(/\/api\/?$/, '');
+            hls = `${root}${hls}`;
+          }
           playVideo.video_id = res.video_id || '';
-          playVideo.hls_url = res.hls_url || '';
+          playVideo.hls_url = hls;
           playVideo.ytFlag = res.ytFlag || 0;
         }
       } catch (e) {
@@ -613,22 +619,43 @@ export default function App() {
   // HLS Player Hook (Handles Live broadcasts and recorded HLS streams)
   useEffect(() => {
     if (view === 'player' && activeVideo) {
-      const hlsSource = activeVideo.hls_url || (activeVideo.video_id && activeVideo.video_id.includes('.m3u8') ? activeVideo.video_id : '');
-      if (hlsSource && videoRef.current) {
-        if (Hls.isSupported()) {
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true
-          });
-          hls.loadSource(hlsSource);
-          hls.attachMedia(videoRef.current);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            videoRef.current?.play().catch(() => {});
-          });
-          return () => hls.destroy();
-        } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-          videoRef.current.src = hlsSource;
-          videoRef.current.play().catch(() => {});
+      let hlsSource = activeVideo.hls_url || (activeVideo.video_id && activeVideo.video_id.includes('.m3u8') ? activeVideo.video_id : '');
+      if (hlsSource) {
+        if (hlsSource.startsWith('/api')) {
+          const root = API_BASE_URL.replace(/\/api\/?$/, '');
+          hlsSource = `${root}${hlsSource}`;
+        }
+        if (videoRef.current) {
+          if (Hls.isSupported()) {
+            const hls = new Hls({
+              enableWorker: true,
+              lowLatencyMode: true
+            });
+            hls.loadSource(hlsSource);
+            hls.attachMedia(videoRef.current);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              videoRef.current?.play().catch(() => {});
+            });
+            hls.on(Hls.Events.ERROR, (event, data) => {
+              if (data.fatal) {
+                switch (data.type) {
+                  case Hls.ErrorTypes.NETWORK_ERROR:
+                    hls.startLoad();
+                    break;
+                  case Hls.ErrorTypes.MEDIA_ERROR:
+                    hls.recoverMediaError();
+                    break;
+                  default:
+                    hls.destroy();
+                    break;
+                }
+              }
+            });
+            return () => hls.destroy();
+          } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+            videoRef.current.src = hlsSource;
+            videoRef.current.play().catch(() => {});
+          }
         }
       }
     }
@@ -1209,21 +1236,22 @@ export default function App() {
                       className="absolute top-3 right-3 z-50 bg-black/85 hover:bg-black border border-zinc-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xl backdrop-blur-md active:scale-95 transition-all"
                     >
                       <Minimize2 className="w-4 h-4 text-amber-400" />
-                      छोटा करें (Short Screen)
+                      Exit Fullscreen
                     </button>
                   )}
 
                   {isHls ? (
-                    <div className="relative w-full h-full flex items-center justify-center">
+                    <div className="relative w-full h-full flex items-center justify-center bg-black">
                       <video 
                         ref={videoRef}
                         autoPlay 
                         playsInline
+                        controls
+                        className="w-full h-full object-contain pointer-events-auto"
                         onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
                         onLoadedMetadata={(e) => setDuration(e.target.duration || 0)}
                         onPlay={() => setIsPlaying(true)}
                         onPause={() => setIsPlaying(false)}
-                        className="w-full h-full object-contain pointer-events-none"
                       />
                     </div>
                   ) : (
@@ -1289,10 +1317,10 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Touch & Click Blocker: completely disables all touches on screen so YouTube header never appears */}
+                      {/* Touch & Click Blocker: prevents YouTube header clicks while allowing mobile browser system drag/swipe gestures */}
                       <div 
-                        className="absolute inset-0 z-30 pointer-events-auto"
-                        style={{ touchAction: 'none' }}
+                        className="absolute inset-0 z-30 pointer-events-auto select-none"
+                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
                         onContextMenu={(e) => e.preventDefault()}
                       />
                     </div>
