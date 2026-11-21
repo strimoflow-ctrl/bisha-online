@@ -151,8 +151,10 @@ def get_auth_headers():
         "User-Agent": "okhttp/4.9.0"
     }
     if session:
+        tok = str(session.get("token", ""))
         headers["User-ID"] = str(session.get("user_id", ""))
-        headers["Authorization"] = str(session.get("token", ""))
+        headers["Authorization"] = tok
+        headers["token"] = tok
     return headers
 
 @app.route("/", methods=["GET"])
@@ -429,40 +431,74 @@ def api_batch_folders(course_id):
 
 @app.route("/api/batch/<course_id>/video/<video_id>", methods=["GET"])
 def api_batch_video_details(course_id, video_id):
-    """Dynamically resolves encrypted HLS streams and YouTube IDs for a video"""
+    """Dynamically resolves encrypted HLS streams and YouTube IDs for a video using multiple query variants"""
     try:
-        url = f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0&folder_wise_course=1"
-        r = make_disha_request(url)
-        data = r.json().get("data", {})
+        urls_to_try = [
+            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0&folder_wise_course=1",
+            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=1&folder_wise_course=1",
+            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&folder_wise_course=1",
+            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0",
+            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=1",
+            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}"
+        ]
         
         hls_stream = ""
         yt_id = ""
         yt_flag = 0
-        
-        if isinstance(data, dict):
-            # Check encrypted_links for HLS m3u8
-            enc_links = data.get("encrypted_links", [])
-            if enc_links and isinstance(enc_links, list):
-                for el in enc_links:
-                    first_path = el.get("path") or el.get("backup_url") or ""
-                    if first_path:
-                        dec_stream = decrypt_val(first_path)
-                        if ".m3u8" in dec_stream.lower() and not hls_stream:
-                            hls_stream = dec_stream
-            
-            # Check direct file_link or video_id
-            raw_link = data.get("file_link") or data.get("video_id") or ""
-            if raw_link:
-                dec = decrypt_val(raw_link)
-                if ".m3u8" in dec.lower():
-                    hls_stream = dec
-                else:
-                    yt_id = dec
-                    yt_flag = 1
-            
-            if not hls_stream and data.get("recording_hls"):
-                hls_stream = data.get("recording_hls")
-        
+        debug_collected = {}
+
+        for u in urls_to_try:
+            try:
+                r = make_disha_request(u)
+                res_json = r.json()
+                data = res_json.get("data", {})
+                param_key = u.split("?", 1)[1] if "?" in u else "raw"
+                debug_collected[param_key] = data
+                
+                if isinstance(data, dict):
+                    # 1. Check encrypted_links for HLS m3u8
+                    enc_links = data.get("encrypted_links", [])
+                    if enc_links and isinstance(enc_links, list):
+                        for el in enc_links:
+                            first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
+                            if first_path:
+                                dec_stream = decrypt_val(first_path)
+                                if ".m3u8" in dec_stream.lower() and not hls_stream:
+                                    hls_stream = dec_stream
+
+                    # 2. Check direct file_link or video_id
+                    raw_link = data.get("file_link") or data.get("video_id") or ""
+                    if raw_link:
+                        dec = decrypt_val(raw_link)
+                        if ".m3u8" in dec.lower():
+                            if not hls_stream:
+                                hls_stream = dec
+                        elif dec and not dec.startswith("http") and not yt_id:
+                            yt_id = dec
+                            yt_flag = 1
+                        elif ("youtube.com" in dec or "youtu.be" in dec) and not yt_id:
+                            m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", dec)
+                            if m:
+                                yt_id = m.group(1)
+                                yt_flag = 1
+
+                    # 3. Check recording_hls
+                    if not hls_stream and data.get("recording_hls"):
+                        hls_stream = data.get("recording_hls")
+                    
+                    # 4. Check clean video_id attribute
+                    if not yt_id and not hls_stream and data.get("ytFlag") == 1 and data.get("video_id"):
+                        raw_vid = str(data.get("video_id"))
+                        dec_vid = decrypt_val(raw_vid)
+                        if len(dec_vid) == 11:
+                            yt_id = dec_vid
+                            yt_flag = 1
+
+                if hls_stream or yt_id:
+                    break
+            except Exception as ex:
+                debug_collected[u] = str(ex)
+
         # If stream is from classx CDN requiring referer, route through backend proxy
         final_hls = hls_stream
         if hls_stream and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):
@@ -473,7 +509,8 @@ def api_batch_video_details(course_id, video_id):
             "video_id": yt_id,
             "hls_url": final_hls,
             "raw_hls_url": hls_stream,
-            "ytFlag": yt_flag
+            "ytFlag": yt_flag,
+            "debug": debug_collected
         })
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500

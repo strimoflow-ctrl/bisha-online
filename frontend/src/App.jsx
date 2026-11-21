@@ -1327,113 +1327,118 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Timeline Progress Seekbar */}
-                <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-3 space-y-2 shadow">
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={togglePlayPause}
-                      className="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center hover:bg-zinc-200 active:scale-95 transition-all shrink-0 shadow"
-                      title={isPlaying ? "Pause" : "Play"}
-                    >
-                      {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 fill-black ml-0.5" />}
-                    </button>
+                {/* Custom Controls (ONLY for YouTube - HLS uses native controls) */}
+                {!isHls && (
+                  <>
+                    {/* Timeline Progress Seekbar */}
+                    <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-3 space-y-2 shadow">
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={togglePlayPause}
+                          className="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center hover:bg-zinc-200 active:scale-95 transition-all shrink-0 shadow"
+                          title={isPlaying ? "Pause" : "Play"}
+                        >
+                          {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 fill-black ml-0.5" />}
+                        </button>
 
-                    {isLive ? (
-                      <div className="flex-1 flex items-center justify-between px-3 py-1.5 bg-red-950/30 border border-red-500/30 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
-                          <span className="text-xs font-bold text-red-400 tracking-wider">
-                            🔴 LIVE STREAM
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-zinc-400 font-medium font-mono">REAL-TIME</span>
+                        {isLive ? (
+                          <div className="flex-1 flex items-center justify-between px-3 py-1.5 bg-red-950/30 border border-red-500/30 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                              <span className="text-xs font-bold text-red-400 tracking-wider">
+                                🔴 LIVE STREAM
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-zinc-400 font-medium font-mono">REAL-TIME</span>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex flex-col justify-center">
+                            <input 
+                              type="range"
+                              min={0}
+                              max={duration > 0 ? duration : 100}
+                              value={currentTime}
+                              onChange={handleSeek}
+                              className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                            />
+                            <div className="flex justify-between items-center text-[10px] text-zinc-400 mt-1 font-mono">
+                              <span>{formatTime(currentTime)}</span>
+                              <span>{formatTime(duration)}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="flex-1 flex flex-col justify-center">
-                        <input 
-                          type="range"
-                          min={0}
-                          max={duration > 0 ? duration : 100}
-                          value={currentTime}
-                          onChange={handleSeek}
-                          className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                        />
-                        <div className="flex justify-between items-center text-[10px] text-zinc-400 mt-1 font-mono">
-                          <span>{formatTime(currentTime)}</span>
-                          <span>{formatTime(duration)}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Player Quick Controls (Seek, Speed, Fullscreen) */}
-                <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-2.5 flex items-center justify-between gap-2 shadow">
-                  {isLive ? (
-                    <div className="flex items-center gap-2 px-1 text-[11px] text-zinc-400 font-medium">
-                      <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 animate-ping"></span>
-                      <span>🔴 Live broadcast active in real-time</span>
                     </div>
-                  ) : (
-                    <>
-                      {/* Seek Buttons */}
-                      <div className="flex items-center gap-1.5">
-                        <button 
-                          onClick={() => seekRelative(-10)}
-                          className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
-                          title="10s Back"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
-                          -10s
-                        </button>
-                        <button 
-                          onClick={() => seekRelative(10)}
-                          className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
-                          title="10s Forward"
-                        >
-                          +10s
-                          <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
-                        </button>
-                      </div>
 
-                      {/* Speed Pills */}
-                      <div className="flex items-center gap-1 bg-[#14141a] p-0.5 rounded-lg border border-[#22222a]">
-                        {[1, 1.25, 1.5, 2].map((rate) => (
-                          <button
-                            key={rate}
-                            onClick={() => changeSpeed(rate)}
-                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
-                              playbackSpeed === rate 
-                                ? 'bg-white text-black shadow-sm' 
-                                : 'text-zinc-400 hover:text-white'
-                            }`}
-                          >
-                            {rate}x
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                    {/* Player Quick Controls (Seek, Speed, Fullscreen) */}
+                    <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-2.5 flex items-center justify-between gap-2 shadow">
+                      {isLive ? (
+                        <div className="flex items-center gap-2 px-1 text-[11px] text-zinc-400 font-medium">
+                          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 animate-ping"></span>
+                          <span>🔴 Live broadcast active in real-time</span>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Seek Buttons */}
+                          <div className="flex items-center gap-1.5">
+                            <button 
+                              onClick={() => seekRelative(-10)}
+                              className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
+                              title="10s Back"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
+                              -10s
+                            </button>
+                            <button 
+                              onClick={() => seekRelative(10)}
+                              className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
+                              title="10s Forward"
+                            >
+                              +10s
+                              <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
+                            </button>
+                          </div>
 
-                  {/* Fullscreen Button */}
-                  <button 
-                    onClick={toggleFullscreen}
-                    className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all shrink-0 ml-auto"
-                    title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-                  >
-                    {isFullscreen ? (
-                      <>
-                        <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Exit Fullscreen</span>
-                      </>
-                    ) : (
-                      <>
-                        <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="hidden sm:inline">Fullscreen</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                          {/* Speed Pills */}
+                          <div className="flex items-center gap-1 bg-[#14141a] p-0.5 rounded-lg border border-[#22222a]">
+                            {[1, 1.25, 1.5, 2].map((rate) => (
+                              <button
+                                key={rate}
+                                onClick={() => changeSpeed(rate)}
+                                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                                  playbackSpeed === rate 
+                                    ? 'bg-white text-black shadow-sm' 
+                                    : 'text-zinc-400 hover:text-white'
+                                }`}
+                              >
+                                {rate}x
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      {/* Fullscreen Button */}
+                      <button 
+                        onClick={toggleFullscreen}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all shrink-0 ml-auto"
+                        title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                      >
+                        {isFullscreen ? (
+                          <>
+                            <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Exit Fullscreen</span>
+                          </>
+                        ) : (
+                          <>
+                            <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="hidden sm:inline">Fullscreen</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 {/* Video Info Card (Only Title, Date, and Notes Download) */}
                 <div className="bg-[#0b0b0e] border border-[#1c1c22] rounded-xl p-3.5 space-y-3 shadow-lg">
