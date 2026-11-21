@@ -581,8 +581,8 @@ export default function App() {
     }
 
     let playVideo = { ...video };
-    // If stream or embed URL is not yet present, dynamically resolve via backend
-    if (!playVideo.video_id || (!playVideo.hls_url && !playVideo.embed_player_url)) {
+    // ONLY fetch if video has NO playable stream (no video_id, no hls_url, no embed_player_url)
+    if (!playVideo.video_id && !playVideo.hls_url && !playVideo.embed_player_url) {
       try {
         const cId = selectedBatch?.id || video.course_id || '62';
         showToast('🔄 Connecting class stream...');
@@ -599,8 +599,8 @@ export default function App() {
             embed = `${root}${embed}`;
           }
           playVideo.video_id = res.video_id || playVideo.video_id || '';
-          playVideo.hls_url = hls;
-          playVideo.embed_player_url = embed;
+          playVideo.hls_url = hls || playVideo.hls_url || '';
+          playVideo.embed_player_url = embed || playVideo.embed_player_url || '';
           playVideo.ytFlag = res.ytFlag ?? playVideo.ytFlag ?? 0;
           playVideo.player_type = res.player_type || '';
         }
