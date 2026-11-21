@@ -62,6 +62,18 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [checkingPdf, setCheckingPdf] = useState(false);
+  const [videoCoverLoading, setVideoCoverLoading] = useState(true);
+
+  // Smart Startup Mask: masks YouTube initial header for 3.5 seconds
+  useEffect(() => {
+    if (view === 'player' && activeVideo) {
+      setVideoCoverLoading(true);
+      const timer = setTimeout(() => {
+        setVideoCoverLoading(false);
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [view, activeVideo]);
 
   // Sync fullscreen change across browser / escape / orientation
   useEffect(() => {
@@ -1003,10 +1015,7 @@ export default function App() {
                   )}
 
                   {isHls ? (
-                    <div 
-                      onClick={togglePlayPause}
-                      className="relative w-full h-full cursor-pointer flex items-center justify-center"
-                    >
+                    <div className="relative w-full h-full flex items-center justify-center">
                       <video 
                         ref={videoRef}
                         autoPlay 
@@ -1017,33 +1026,44 @@ export default function App() {
                         onPause={() => setIsPlaying(false)}
                         className="w-full h-full object-contain pointer-events-none"
                       />
-                      {!isPlaying && (
-                        <div className="absolute w-14 h-14 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl">
-                          <Play className="w-7 h-7 fill-white ml-1" />
-                        </div>
-                      )}
                     </div>
                   ) : (
-                    <div className="relative w-full h-full overflow-hidden">
+                    <div className="relative w-full h-full overflow-hidden bg-black flex items-center justify-center">
+                      {/* 100% Original 16:9 - No Zoom, No Cutoff */}
                       <iframe 
                         ref={iframeRef}
                         src={`https://www.youtube.com/embed/${activeVideo.video_id}?autoplay=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1&fs=0&disablekb=1`}
                         title={activeVideo.title}
-                        className="w-full h-full border-0 absolute inset-0 pointer-events-none scale-[1.12] origin-center"
+                        className="w-full h-full border-0 absolute inset-0 pointer-events-none"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                         allowFullScreen
                       />
-                      {/* Transparent Tap Interceptor: disables all YouTube clicks & handles play/pause */}
-                      <div 
-                        onClick={togglePlayPause}
-                        className="absolute inset-0 z-30 cursor-pointer flex items-center justify-center bg-transparent"
-                      >
-                        {!isPlaying && (
-                          <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl">
-                            <Play className="w-7 h-7 fill-white ml-1" />
+
+                      {/* Smart Startup Shield: Covers YouTube's initial 3.5s channel/title header */}
+                      {videoCoverLoading && (
+                        <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center transition-opacity duration-700 pointer-events-none">
+                          {activeVideo.thumbnail && (
+                            <img 
+                              src={activeVideo.thumbnail} 
+                              alt={activeVideo.title} 
+                              className="absolute inset-0 w-full h-full object-cover opacity-35"
+                            />
+                          )}
+                          <div className="relative z-10 flex flex-col items-center gap-2.5 bg-black/70 px-4 py-2.5 rounded-xl border border-zinc-800 backdrop-blur-md">
+                            <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                            <span className="text-[11px] font-bold text-zinc-300 tracking-wide">
+                              क्लास लोड हो रही है...
+                            </span>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
+
+                      {/* Touch & Click Blocker: completely disables all touches on screen so YouTube header never appears */}
+                      <div 
+                        className="absolute inset-0 z-30 pointer-events-auto"
+                        style={{ touchAction: 'none' }}
+                        onContextMenu={(e) => e.preventDefault()}
+                      />
                     </div>
                   )}
                 </div>
