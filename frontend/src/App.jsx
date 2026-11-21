@@ -1003,25 +1003,48 @@ export default function App() {
                   )}
 
                   {isHls ? (
-                    <video 
-                      ref={videoRef}
-                      autoPlay 
-                      playsInline
-                      onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
-                      onLoadedMetadata={(e) => setDuration(e.target.duration || 0)}
-                      onPlay={() => setIsPlaying(true)}
-                      onPause={() => setIsPlaying(false)}
-                      className="w-full h-full object-contain"
-                    />
+                    <div 
+                      onClick={togglePlayPause}
+                      className="relative w-full h-full cursor-pointer flex items-center justify-center"
+                    >
+                      <video 
+                        ref={videoRef}
+                        autoPlay 
+                        playsInline
+                        onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
+                        onLoadedMetadata={(e) => setDuration(e.target.duration || 0)}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                        className="w-full h-full object-contain pointer-events-none"
+                      />
+                      {!isPlaying && (
+                        <div className="absolute w-14 h-14 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl">
+                          <Play className="w-7 h-7 fill-white ml-1" />
+                        </div>
+                      )}
+                    </div>
                   ) : (
-                    <iframe 
-                      ref={iframeRef}
-                      src={`https://www.youtube.com/embed/${activeVideo.video_id}?autoplay=1&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1&fs=1&controls=1`}
-                      title={activeVideo.title}
-                      className="w-full h-full border-0 absolute inset-0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                      allowFullScreen
-                    />
+                    <div className="relative w-full h-full overflow-hidden">
+                      <iframe 
+                        ref={iframeRef}
+                        src={`https://www.youtube.com/embed/${activeVideo.video_id}?autoplay=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1&fs=0&disablekb=1`}
+                        title={activeVideo.title}
+                        className="w-full h-full border-0 absolute inset-0 pointer-events-none scale-[1.12] origin-center"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                        allowFullScreen
+                      />
+                      {/* Transparent Tap Interceptor: disables all YouTube clicks & handles play/pause */}
+                      <div 
+                        onClick={togglePlayPause}
+                        className="absolute inset-0 z-30 cursor-pointer flex items-center justify-center bg-transparent"
+                      >
+                        {!isPlaying && (
+                          <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl">
+                            <Play className="w-7 h-7 fill-white ml-1" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
 
