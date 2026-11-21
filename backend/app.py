@@ -449,109 +449,115 @@ def api_batch_folders(course_id):
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500
 
+VIDEO_CACHE_FILE = os.path.join(os.path.dirname(__file__), "video_cache.json")
+VIDEO_CACHE = {}
+
+def load_video_cache():
+    global VIDEO_CACHE
+    if not VIDEO_CACHE and os.path.exists(VIDEO_CACHE_FILE):
+        try:
+            with open(VIDEO_CACHE_FILE, "r", encoding="utf-8") as f:
+                VIDEO_CACHE = json.load(f)
+        except Exception:
+            VIDEO_CACHE = {}
+    return VIDEO_CACHE
+
+def save_video_cache(key, data):
+    global VIDEO_CACHE
+    VIDEO_CACHE[key] = data
+    try:
+        with open(VIDEO_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(VIDEO_CACHE, f, ensure_ascii=False)
+    except Exception:
+        pass
+
 @app.route("/api/batch/<course_id>/video/<video_id>", methods=["GET"])
 def api_batch_video_details(course_id, video_id):
-    """Dynamically resolves encrypted HLS streams, embedded Appx players, and YouTube IDs for a video"""
+    """Dynamically resolves encrypted HLS streams, embedded Appx players, and YouTube IDs for a video with persistent caching"""
+    cache = load_video_cache()
+    cache_key = f"{course_id}_{video_id}"
+    if cache_key in cache:
+        return jsonify(cache[cache_key])
+
     try:
-        urls_to_try = [
-            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0&folder_wise_course=1",
-            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=1&folder_wise_course=1",
-            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&folder_wise_course=1",
-            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0",
-            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=1",
-            f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}"
-        ]
-        
         hls_stream = ""
         yt_id = ""
         yt_flag = 0
         embed_player_url = ""
         debug_collected = {}
 
-        for u in urls_to_try:
-            try:
-                r = make_disha_request(u)
-                res_json = r.json()
-                data = res_json.get("data", {})
-                param_key = u.split("?", 1)[1] if "?" in u else "raw"
-                debug_collected[param_key] = data
-                
-                if isinstance(data, dict):
-                    # 1. Check Appx video_player_token for official embedded web player
-                    tok = str(data.get("video_player_token") or "").strip()
-                    if tok and tok != "1234":
-                        base_p = str(data.get("video_player_url") or "")
-                        if not base_p or "token=" not in base_p:
-                            base_p = "https://appx-play.classx.co.in/combined-img-player?isMobile=true&debug=true&token="
-                        full_target = f"{base_p}{tok}"
-                        embed_player_url = f"/api/disha-player?url={requests.utils.quote(full_target)}"
-
-                    # 2. Check encrypted_links for HLS m3u8
-                    enc_links = data.get("encrypted_links", [])
-                    if enc_links and isinstance(enc_links, list):
-                        for el in enc_links:
-                            first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
-                            if first_path:
-                                dec_stream = decrypt_val(first_path)
-                                if ".m3u8" in dec_stream.lower() and not hls_stream:
-                                    hls_stream = dec_stream
-
-                    # 3. Check direct file_link or video_id
-                    raw_link = data.get("file_link") or data.get("video_id") or ""
-                    if raw_link:
-                        dec = decrypt_val(raw_link)
-                        if ".m3u8" in dec.lower():
-                            if not hls_stream:
-                                hls_stream = dec
-                        elif dec and not dec.startswith("http") and not yt_id:
-                            yt_id = dec
-                            yt_flag = 1
-                        elif ("youtube.com" in dec or "youtu.be" in dec) and not yt_id:
-                            m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", dec)
-                            if m:
-                                yt_id = m.group(1)
-                                yt_flag = 1
-
-                    # 4. Check recording_hls
-                    if not hls_stream and data.get("recording_hls"):
-                        hls_stream = data.get("recording_hls")
-                    
-                    # 5. Check clean video_id attribute
-                    if not yt_id and not hls_stream and data.get("ytFlag") == 1 and data.get("video_id"):
-                        raw_vid = str(data.get("video_id"))
-                        dec_vid = decrypt_val(raw_vid)
-                        if len(dec_vid) == 11:
-                            yt_id = dec_vid
-                            yt_flag = 1
-
-                if embed_player_url or hls_stream or yt_id:
+        # 1. First, check if video is currently a live broadcast
+        try:
+            status_url = f"{BASE_URL}get/course_contents_by_live_status?course_id={course_id}"
+            r_status = make_disha_request(status_url).json()
+            for lv in r_status.get("data", {}).get("live", []):
+                if str(lv.get("id")) == str(video_id):
+                    live_links = lv.get("livestream_links", [])
+                    if live_links and isinstance(live_links, list):
+                        first_p = live_links[0].get("path") or ""
+                        if first_p:
+                            dec_p = decrypt_val(first_p)
+                            if ".m3u8" in dec_p.lower():
+                                hls_stream = dec_p
+                    if not hls_stream:
+                        dec_f = decrypt_val(lv.get("file_link") or lv.get("recording_hls") or "")
+                        if ".m3u8" in dec_f.lower():
+                            hls_stream = dec_f
                     break
-            except Exception as ex:
-                debug_collected[u] = str(ex)
+        except Exception as lv_err:
+            debug_collected["live_check_err"] = str(lv_err)
 
-        # 1. Check if video is currently a live broadcast
+        # 2. Single safe request to official endpoint (avoids rate limits)
         if not embed_player_url and not hls_stream and not yt_id:
             try:
-                status_url = f"{BASE_URL}get/course_contents_by_live_status?course_id={course_id}"
-                r_status = make_disha_request(status_url).json()
-                for lv in r_status.get("data", {}).get("live", []):
-                    if str(lv.get("id")) == str(video_id):
-                        live_links = lv.get("livestream_links", [])
-                        if live_links and isinstance(live_links, list):
-                            first_p = live_links[0].get("path") or ""
-                            if first_p:
-                                dec_p = decrypt_val(first_p)
-                                if ".m3u8" in dec_p.lower():
-                                    hls_stream = dec_p
-                        if not hls_stream:
-                            dec_f = decrypt_val(lv.get("file_link") or lv.get("recording_hls") or "")
-                            if ".m3u8" in dec_f.lower():
-                                hls_stream = dec_f
-                        break
-            except Exception as lv_err:
-                debug_collected["live_check_err"] = str(lv_err)
+                u = f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0&folder_wise_course=1"
+                r = make_disha_request(u)
+                if r.status_code == 200:
+                    res_json = r.json()
+                    data = res_json.get("data", {})
+                    if isinstance(data, dict):
+                        # A. Check Appx video_player_token
+                        tok = str(data.get("video_player_token") or "").strip()
+                        if tok and tok != "1234":
+                            base_p = str(data.get("video_player_url") or "")
+                            if not base_p or "token=" not in base_p:
+                                base_p = "https://appx-play.classx.co.in/combined-img-player?isMobile=true&debug=true&token="
+                            full_target = f"{base_p}{tok}"
+                            embed_player_url = f"/api/disha-player?url={requests.utils.quote(full_target)}"
 
-        # 2. Fallback via gbdoc API if Appx API is rate-limited (429) or returned null
+                        # B. Check direct file_link or video_id
+                        raw_link = data.get("file_link") or data.get("video_id") or ""
+                        if raw_link:
+                            dec = decrypt_val(raw_link)
+                            if ".m3u8" in dec.lower():
+                                if not hls_stream:
+                                    hls_stream = dec
+                            elif dec and not dec.startswith("http") and not yt_id:
+                                yt_id = dec
+                                yt_flag = 1
+                            elif ("youtube.com" in dec or "youtu.be" in dec) and not yt_id:
+                                m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", dec)
+                                if m:
+                                    yt_id = m.group(1)
+                                    yt_flag = 1
+
+                        # C. Check encrypted_links for HLS m3u8
+                        enc_links = data.get("encrypted_links", [])
+                        if enc_links and isinstance(enc_links, list):
+                            for el in enc_links:
+                                first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
+                                if first_path:
+                                    dec_stream = decrypt_val(first_path)
+                                    if ".m3u8" in dec_stream.lower() and not hls_stream:
+                                        hls_stream = dec_stream
+
+                        # D. Check recording_hls
+                        if not hls_stream and data.get("recording_hls"):
+                            hls_stream = data.get("recording_hls")
+            except Exception as ex:
+                debug_collected["primary_err"] = str(ex)
+
+        # 3. Fallback via gbdoc API if Appx API is rate-limited or returned null
         if not embed_player_url and not hls_stream and not yt_id:
             try:
                 fb_url = f"https://gbdoc.vercel.app/api/disha/video?batchId={course_id}&lectureId={video_id}"
@@ -580,7 +586,7 @@ def api_batch_video_details(course_id, video_id):
 
         player_type = "youtube" if yt_id else ("embed" if embed_player_url else ("hls" if final_hls else ""))
 
-        return jsonify({
+        res_payload = {
             "status": 200,
             "video_id": yt_id,
             "hls_url": final_hls,
@@ -589,7 +595,15 @@ def api_batch_video_details(course_id, video_id):
             "player_type": player_type,
             "ytFlag": yt_flag,
             "debug": debug_collected
-        })
+        }
+
+        # Cache valid playable responses to eliminate repeated hits and save account quota
+        if player_type:
+            save_video_cache(cache_key, res_payload)
+
+        return jsonify(res_payload)
+    except Exception as e:
+        return jsonify({"status": 500, "error": str(e)}), 500
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500
 
