@@ -62,17 +62,102 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [checkingPdf, setCheckingPdf] = useState(false);
-  const [videoCoverLoading, setVideoCoverLoading] = useState(true);
+  
+  // Format seconds to mm:ss or hh:mm:ss
+  const formatTime = (secs) => {
+    if (!secs || isNaN(secs) || secs < 0) return '00:00';
+    const totalSecs = Math.floor(secs);
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    const h = Math.floor(m / 60);
+    if (h > 0) {
+      return `${h}:${String(m % 60).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
 
-  // Smart Startup Mask: masks YouTube initial header for 3.5 seconds
+  // High-Tech Cyber Decryption Shield State
+  const [shieldState, setShieldState] = useState({
+    active: true,
+    title: 'Disha Secure CDN',
+    text: '🟢 Audio Stream Resolved • Audio Active',
+    progress: 25
+  });
+  const shieldTimersRef = useRef([]);
+
+  const clearShieldTimers = () => {
+    shieldTimersRef.current.forEach(t => clearTimeout(t));
+    shieldTimersRef.current = [];
+  };
+
+  const triggerShield = (type, timeVal) => {
+    clearShieldTimers();
+    if (type === 'start') {
+      setShieldState({
+        active: true,
+        title: 'Disha Secure CDN',
+        text: '🟢 Audio Stream Resolved • Audio Active',
+        progress: 25
+      });
+      shieldTimersRef.current.push(
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '⚡ Connecting Media Server (Node #04)...', progress: 55 }));
+        }, 1200),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '🔐 Decrypting AES-128 Video Stream...', progress: 85 }));
+        }, 2600),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Stream Decrypted • HD Ready', progress: 100 }));
+        }, 4200),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, active: false }));
+        }, 5000)
+      );
+    } else if (type === 'seek') {
+      const timeStr = typeof timeVal === 'number' ? formatTime(timeVal) : '';
+      setShieldState({
+        active: true,
+        title: 'Fast Keyframe Sync',
+        text: `⚡ Syncing Media Timestamp ${timeStr ? 'at ' + timeStr : ''}...`,
+        progress: 40
+      });
+      shieldTimersRef.current.push(
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '🔐 Re-decrypting Frame Buffer...', progress: 85 }));
+        }, 1200),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Stream Synced', progress: 100 }));
+        }, 2700),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, active: false }));
+        }, 3500)
+      );
+    } else if (type === 'resume') {
+      setShieldState({
+        active: true,
+        title: 'Resuming Stream',
+        text: '⚡ Resuming Secure Playback...',
+        progress: 45
+      });
+      shieldTimersRef.current.push(
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '🔐 Stabilizing CDN Buffer...', progress: 85 }));
+        }, 1200),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Playback Active', progress: 100 }));
+        }, 2600),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, active: false }));
+        }, 3400)
+      );
+    }
+  };
+
   useEffect(() => {
     if (view === 'player' && activeVideo) {
-      setVideoCoverLoading(true);
-      const timer = setTimeout(() => {
-        setVideoCoverLoading(false);
-      }, 3500);
-      return () => clearTimeout(timer);
+      triggerShield('start');
     }
+    return () => clearShieldTimers();
   }, [view, activeVideo]);
 
   // Sync fullscreen change across browser / escape / orientation
@@ -169,6 +254,7 @@ export default function App() {
       } else {
         iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo' }), '*');
         setIsPlaying(true);
+        triggerShield('resume');
       }
     }
   };
@@ -182,21 +268,11 @@ export default function App() {
       videoRef.current.currentTime = newTime;
     } else if (iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [newTime, true] }), '*');
+      triggerShield('seek', newTime);
     }
   };
 
-  // Format seconds to mm:ss or hh:mm:ss
-  const formatTime = (secs) => {
-    if (!secs || isNaN(secs) || secs < 0) return '00:00';
-    const totalSecs = Math.floor(secs);
-    const m = Math.floor(totalSecs / 60);
-    const s = totalSecs % 60;
-    const h = Math.floor(m / 60);
-    if (h > 0) {
-      return `${h}:${String(m % 60).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    }
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
+
 
   // Smart PDF Download
   const handleDownloadPdf = async (url) => {
@@ -231,16 +307,19 @@ export default function App() {
     showToast(`स्पीड: ${rate}x`);
   };
 
-  // Seek +/- 10s
+  // Seek +/- 10s (Fixed YouTube seekTo)
   const seekRelative = (seconds) => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
+    const targetTime = Math.max(0, Math.min(duration || 999999, currentTime + seconds));
+    setCurrentTime(targetTime);
+    const isHls = Boolean(activeVideo?.hls_url || (activeVideo?.video_id && activeVideo.video_id.includes('.m3u8')));
+    if (isHls && videoRef.current) {
+      videoRef.current.currentTime = targetTime;
+    } else if (iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func: 'seekBy', args: [seconds, true] }),
+        JSON.stringify({ event: 'command', func: 'seekTo', args: [targetTime, true] }),
         '*'
       );
-    }
-    if (videoRef.current) {
-      videoRef.current.currentTime += seconds;
+      triggerShield('seek', targetTime);
     }
     showToast(seconds > 0 ? `+${seconds}s आगे` : `${seconds}s पीछे`);
   };
@@ -398,6 +477,7 @@ export default function App() {
 
   // Open Video in Dedicated Player Page
   const handlePlayVideo = (video) => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     const isPlayable = Boolean(
       video.video_id || 
       video.hls_url || 
@@ -1039,21 +1119,27 @@ export default function App() {
                         allowFullScreen
                       />
 
-                      {/* Smart Startup Shield: Covers YouTube's initial 3.5s channel/title header */}
-                      {videoCoverLoading && (
-                        <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center transition-opacity duration-700 pointer-events-none">
-                          {activeVideo.thumbnail && (
-                            <img 
-                              src={activeVideo.thumbnail} 
-                              alt={activeVideo.title} 
-                              className="absolute inset-0 w-full h-full object-cover opacity-35"
-                            />
-                          )}
-                          <div className="relative z-10 flex flex-col items-center gap-2.5 bg-black/70 px-4 py-2.5 rounded-xl border border-zinc-800 backdrop-blur-md">
-                            <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                            <span className="text-[11px] font-bold text-zinc-300 tracking-wide">
-                              क्लास लोड हो रही है...
-                            </span>
+                      {/* Pure Black Cyber Decryption Shield */}
+                      {shieldState.active && (
+                        <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center transition-opacity duration-500 pointer-events-none select-none px-6">
+                          <div className="w-full max-w-[290px] p-4 rounded-2xl bg-[#09090c] border border-emerald-500/30 flex flex-col items-center gap-3 shadow-[0_0_40px_rgba(16,185,129,0.15)] backdrop-blur-md">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                              <span className="text-[11px] font-mono font-bold text-emerald-400 tracking-wider uppercase">
+                                {shieldState.title}
+                              </span>
+                            </div>
+
+                            <div className="w-full bg-zinc-900/90 h-1.5 rounded-full overflow-hidden border border-zinc-800/80">
+                              <div 
+                                className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                                style={{ width: `${shieldState.progress}%` }}
+                              />
+                            </div>
+
+                            <p className="text-[10px] text-zinc-300 font-mono tracking-tight text-center leading-snug animate-pulse">
+                              {shieldState.text}
+                            </p>
                           </div>
                         </div>
                       )}
