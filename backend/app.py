@@ -441,11 +441,12 @@ def api_batch_video_details(course_id, video_id):
             # Check encrypted_links for HLS m3u8
             enc_links = data.get("encrypted_links", [])
             if enc_links and isinstance(enc_links, list):
-                first_path = enc_links[0].get("path") or enc_links[0].get("backup_url") or ""
-                if first_path:
-                    dec_stream = decrypt_val(first_path)
-                    if ".m3u8" in dec_stream.lower():
-                        hls_stream = dec_stream
+                for el in enc_links:
+                    first_path = el.get("path") or el.get("backup_url") or ""
+                    if first_path:
+                        dec_stream = decrypt_val(first_path)
+                        if ".m3u8" in dec_stream.lower() and not hls_stream:
+                            hls_stream = dec_stream
             
             # Check direct file_link or video_id
             raw_link = data.get("file_link") or data.get("video_id") or ""
@@ -464,7 +465,8 @@ def api_batch_video_details(course_id, video_id):
             "status": 200,
             "video_id": yt_id,
             "hls_url": hls_stream,
-            "ytFlag": yt_flag
+            "ytFlag": yt_flag,
+            "debug_data": data
         })
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500
