@@ -1,0 +1,35 @@
+# Environment variables and secrets
+.env
+backend/.env
+*.env
+session.json
+backend/session.json
+
+# Scratch & Old Archive Files
+login.py
+api_server.py
+scratch_live.py
+js/
+*.zip
+*.apk
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Node & Build artifacts
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+build/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
