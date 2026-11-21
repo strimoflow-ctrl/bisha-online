@@ -92,7 +92,7 @@ export default function App() {
     shieldTimersRef.current = [];
   };
 
-  // Progressive countdown starts ONLY after video frames physically start rendering (playerState === 1)
+  // Progressive countdown holds for a FULL 5 SECONDS once video frames physically start rendering (playerState === 1)
   const startDecryptionCountdown = (mode) => {
     clearShieldTimers();
     if (mode === 'start') {
@@ -100,51 +100,63 @@ export default function App() {
         active: true,
         title: 'DISHA SECURE PROTOCOL',
         text: '🟢 Audio Stream Active • Decrypting Video Stream...',
-        progress: 45
+        progress: 25
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '⚡ Node ASIA-SOUTH1 Decrypting Stream [1080P]...', progress: 75 }));
-        }, 1000),
+          setShieldState(s => ({ ...s, text: '⚡ Node ASIA-SOUTH1 Decrypting Stream [1080P]...', progress: 55 }));
+        }, 1200),
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '🔐 AES-256 Frame Decrypted • HD Ready', progress: 95 }));
-        }, 2200),
+          setShieldState(s => ({ ...s, text: '🔐 AES-256 Frame Decrypted • HD Ready', progress: 85 }));
+        }, 2800),
         setTimeout(() => {
           setShieldState(s => ({ ...s, text: '✨ Stream Decrypted • HD Ready', progress: 100 }));
-        }, 3400),
+        }, 4400),
         setTimeout(() => {
           setShieldState(s => ({ ...s, active: false }));
-        }, 3800)
+        }, 5000)
       );
     } else if (mode === 'seek') {
       setShieldState({
         active: true,
         title: 'KEYFRAME RE-SYNC',
-        text: '🔐 Syncing Frame Buffer at Timestamp...',
-        progress: 60
+        text: '🟢 Frame Syncing • Decrypting Buffer...',
+        progress: 30
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '✨ Stream Synced • HD Ready', progress: 100 }));
+          setShieldState(s => ({ ...s, text: '⚡ Node ASIA-SOUTH1 Decrypting Stream [1080P]...', progress: 60 }));
         }, 1200),
         setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '🔐 AES-256 Keyframe Buffer Decrypted...', progress: 85 }));
+        }, 2800),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Stream Synced • HD Ready', progress: 100 }));
+        }, 4400),
+        setTimeout(() => {
           setShieldState(s => ({ ...s, active: false }));
-        }, 1800)
+        }, 5000)
       );
     } else if (mode === 'resume') {
       setShieldState({
         active: true,
         title: 'RESUMING STREAM',
-        text: '⚡ Resuming Secure Playback...',
-        progress: 70
+        text: '🟢 Audio Stream Active • Resuming Playback...',
+        progress: 30
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '✨ Playback Active', progress: 100 }));
-        }, 1000),
+          setShieldState(s => ({ ...s, text: '⚡ Stabilizing CDN Buffer [1080P]...', progress: 60 }));
+        }, 1200),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '🔐 AES-256 Stream Verified...', progress: 85 }));
+        }, 2800),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Playback Active • HD Ready', progress: 100 }));
+        }, 4400),
         setTimeout(() => {
           setShieldState(s => ({ ...s, active: false }));
-        }, 1600)
+        }, 5000)
       );
     }
   };
@@ -171,16 +183,16 @@ export default function App() {
         active: true,
         title: 'DISHA SECURE PROTOCOL',
         text: '📡 Connecting Disha Media Stream (Node #04)...',
-        progress: 20
+        progress: 15
       });
-      // Safety fallback: if YouTube fails to send playerState===1 within 5.5s, lift shield anyway
+      // Safety fallback: if YouTube fails to send playerState===1 within 6s, start 5s countdown
       shieldTimersRef.current.push(
         setTimeout(() => {
           if (waitingPlayRef.current) {
             waitingPlayRef.current = false;
             startDecryptionCountdown('start');
           }
-        }, 5500)
+        }, 6000)
       );
     } else if (type === 'seek') {
       const timeStr = typeof timeVal === 'number' ? formatTime(timeVal) : '';
@@ -188,22 +200,23 @@ export default function App() {
         active: true,
         title: 'KEYFRAME RE-SYNC',
         text: `⚡ Buffering Media Frame ${timeStr ? 'at ' + timeStr : ''}...`,
-        progress: 35
+        progress: 20
       });
+      // For seek: if playerState===1 is not received within 1.5s (e.g. already playing), start 5s countdown
       shieldTimersRef.current.push(
         setTimeout(() => {
           if (waitingPlayRef.current) {
             waitingPlayRef.current = false;
             startDecryptionCountdown('seek');
           }
-        }, 3500)
+        }, 1500)
       );
     } else if (type === 'resume') {
       setShieldState({
         active: true,
         title: 'RESUMING STREAM',
         text: '⚡ Resuming Secure Stream...',
-        progress: 40
+        progress: 20
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
@@ -211,7 +224,7 @@ export default function App() {
             waitingPlayRef.current = false;
             startDecryptionCountdown('resume');
           }
-        }, 3000)
+        }, 1500)
       );
     }
   };
