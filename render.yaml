@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: disha-pro-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: DISHA_BASE_URL
+        value: https://dishaonlineclassesapi.akamai.net.in/
+      - key: DISHA_CLIENT_SERVICE
+        value: Appx
+      - key: DISHA_AUTH_KEY
+        value: appxapi
+      - key: DISHA_DEFAULT_IV
+        value: ZmVkY2JhOTg3NjU0MzIxMA==
+      - key: DISHA_AES_KEY
+        sync: false
+      - key: DISHA_EMAIL
+        sync: false
+      - key: DISHA_PASSWORD
+        sync: false
