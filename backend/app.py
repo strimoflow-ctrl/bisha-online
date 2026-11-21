@@ -246,11 +246,11 @@ def api_batch_overview(course_id):
                 
                 live_classes.append({
                     "id": str(it.get("id")),
-                    "title": it.get("Title") or it.get("title") or "लाइव क्लास",
+                    "title": it.get("Title") or it.get("title") or "Live Class",
                     "thumbnail": it.get("thumbnail") or "https://appx-content-v2.classx.co.in/subject/2026-11-21-0_540164180995204.png",
                     "video_id": yt_id,
                     "live_status": 1,
-                    "date": it.get("date_and_time") or it.get("event_date") or "अभी लाइव",
+                    "date": it.get("date_and_time") or it.get("event_date") or "Live Now",
                     "hls_url": hls_stream_url,
                     "ytFlag": yt_flag,
                     "material_type": "VIDEO"
@@ -260,12 +260,12 @@ def api_batch_overview(course_id):
             for it in status_data.get("upcoming", []):
                 upcoming_classes.append({
                     "id": str(it.get("id")),
-                    "title": it.get("Title") or it.get("title") or "आगामी क्लास",
+                    "title": it.get("Title") or it.get("title") or "Upcoming Class",
                     "description": it.get("description") or "",
                     "thumbnail": it.get("thumbnail") or "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png",
                     "video_id": "",
                     "live_status": 2, # UPCOMING
-                    "date": it.get("date_and_time") or it.get("event_date") or "जल्द शुरू होगी",
+                    "date": it.get("date_and_time") or it.get("event_date") or "Starting Soon",
                     "material_type": "VIDEO",
                     "is_upcoming": True
                 })
@@ -374,6 +374,23 @@ def api_batch_folders(course_id):
                     decrypted_video_id = ""
                     yt_flag = 0
                 
+                # If neither youtube id nor hls stream found in folder item, resolve via fetchVideoDetailsById
+                if not decrypted_video_id and not hls_stream and item_id:
+                    try:
+                        r_det = make_disha_request(f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={item_id}&ytflag=0&folder_wise_course=1").json()
+                        d_data = r_det.get("data", {})
+                        if isinstance(d_data, dict):
+                            enc_links = d_data.get("encrypted_links", [])
+                            if enc_links and isinstance(enc_links, list):
+                                first_path = enc_links[0].get("path") or enc_links[0].get("backup_url") or ""
+                                if first_path:
+                                    dec_stream = decrypt_val(first_path)
+                                    if ".m3u8" in dec_stream.lower():
+                                        hls_stream = dec_stream
+                                        yt_flag = 0
+                    except Exception:
+                        pass
+                
                 clean_pdf = sanitize_pdf_link(it.get("pdf_link") or it.get("pdf_link2") or "")
                 live_status = int(it.get("live_status", 3))
                 
@@ -384,7 +401,7 @@ def api_batch_folders(course_id):
                 entry["pdf_link"] = clean_pdf
                 entry["has_notes"] = bool(clean_pdf)
                 entry["live_status"] = live_status
-                entry["is_upcoming"] = (live_status == 2 or (not decrypted_video_id and not hls_stream))
+                entry["is_upcoming"] = (live_status == 2)
                 entry["duration"] = it.get("duration") or ""
             elif mtype in ["PDF", "FILE"]:
                 clean_pdf = sanitize_pdf_link(it.get("file_link") or it.get("pdf_link") or it.get("pdf_link2") or "")
@@ -405,6 +422,50 @@ def api_batch_folders(course_id):
             items.append(entry)
             
         return jsonify({"status": 200, "count": len(items), "items": items})
+    except Exception as e:
+        return jsonify({"status": 500, "error": str(e)}), 500
+
+@app.route("/api/batch/<course_id>/video/<video_id>", methods=["GET"])
+def api_batch_video_details(course_id, video_id):
+    """Dynamically resolves encrypted HLS streams and YouTube IDs for a video"""
+    try:
+        url = f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0&folder_wise_course=1"
+        r = make_disha_request(url)
+        data = r.json().get("data", {})
+        
+        hls_stream = ""
+        yt_id = ""
+        yt_flag = 0
+        
+        if isinstance(data, dict):
+            # Check encrypted_links for HLS m3u8
+            enc_links = data.get("encrypted_links", [])
+            if enc_links and isinstance(enc_links, list):
+                first_path = enc_links[0].get("path") or enc_links[0].get("backup_url") or ""
+                if first_path:
+                    dec_stream = decrypt_val(first_path)
+                    if ".m3u8" in dec_stream.lower():
+                        hls_stream = dec_stream
+            
+            # Check direct file_link or video_id
+            raw_link = data.get("file_link") or data.get("video_id") or ""
+            if raw_link:
+                dec = decrypt_val(raw_link)
+                if ".m3u8" in dec.lower():
+                    hls_stream = dec
+                else:
+                    yt_id = dec
+                    yt_flag = 1
+            
+            if not hls_stream and data.get("recording_hls"):
+                hls_stream = data.get("recording_hls")
+        
+        return jsonify({
+            "status": 200,
+            "video_id": yt_id,
+            "hls_url": hls_stream,
+            "ytFlag": yt_flag
+        })
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500
 

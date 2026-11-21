@@ -76,89 +76,166 @@ export default function App() {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  // High-Tech Cyber Decryption Shield State
+  // High-Tech Cyber Decryption Shield State (With Dynamic Play Detection)
   const [shieldState, setShieldState] = useState({
-    active: true,
-    title: 'Disha Secure CDN',
-    text: '🟢 Audio Stream Resolved • Audio Active',
-    progress: 25
+    active: false,
+    title: 'DISHA SECURE PROTOCOL',
+    text: '📡 Connecting Disha Media Stream (Node #04)...',
+    progress: 20
   });
   const shieldTimersRef = useRef([]);
+  const waitingPlayRef = useRef(false);
+  const currentShieldModeRef = useRef('start');
 
   const clearShieldTimers = () => {
     shieldTimersRef.current.forEach(t => clearTimeout(t));
     shieldTimersRef.current = [];
   };
 
-  const triggerShield = (type, timeVal) => {
+  // Progressive countdown starts ONLY after video frames physically start rendering (playerState === 1)
+  const startDecryptionCountdown = (mode) => {
     clearShieldTimers();
-    if (type === 'start') {
+    if (mode === 'start') {
       setShieldState({
         active: true,
-        title: 'Disha Secure CDN',
-        text: '🟢 Audio Stream Resolved • Audio Active',
-        progress: 25
+        title: 'DISHA SECURE PROTOCOL',
+        text: '🟢 Audio Stream Active • Decrypting Video Stream...',
+        progress: 45
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '⚡ Connecting Media Server (Node #04)...', progress: 55 }));
-        }, 1200),
+          setShieldState(s => ({ ...s, text: '⚡ Node ASIA-SOUTH1 Decrypting Stream [1080P]...', progress: 75 }));
+        }, 1000),
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '🔐 Decrypting AES-128 Video Stream...', progress: 85 }));
-        }, 2600),
+          setShieldState(s => ({ ...s, text: '🔐 AES-256 Frame Decrypted • HD Ready', progress: 95 }));
+        }, 2200),
         setTimeout(() => {
           setShieldState(s => ({ ...s, text: '✨ Stream Decrypted • HD Ready', progress: 100 }));
-        }, 4200),
+        }, 3400),
         setTimeout(() => {
           setShieldState(s => ({ ...s, active: false }));
-        }, 5000)
+        }, 3800)
+      );
+    } else if (mode === 'seek') {
+      setShieldState({
+        active: true,
+        title: 'KEYFRAME RE-SYNC',
+        text: '🔐 Syncing Frame Buffer at Timestamp...',
+        progress: 60
+      });
+      shieldTimersRef.current.push(
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Stream Synced • HD Ready', progress: 100 }));
+        }, 1200),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, active: false }));
+        }, 1800)
+      );
+    } else if (mode === 'resume') {
+      setShieldState({
+        active: true,
+        title: 'RESUMING STREAM',
+        text: '⚡ Resuming Secure Playback...',
+        progress: 70
+      });
+      shieldTimersRef.current.push(
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, text: '✨ Playback Active', progress: 100 }));
+        }, 1000),
+        setTimeout(() => {
+          setShieldState(s => ({ ...s, active: false }));
+        }, 1600)
+      );
+    }
+  };
+
+  const triggerShield = (type, timeVal) => {
+    const isHls = Boolean(
+      activeVideo?.hls_url || 
+      (activeVideo?.video_id && activeVideo.video_id.includes('.m3u8'))
+    );
+    // HLS / Native live streams have ZERO YouTube branding, so NEVER show shield!
+    if (isHls) {
+      clearShieldTimers();
+      setShieldState({ active: false, title: '', text: '', progress: 100 });
+      waitingPlayRef.current = false;
+      return;
+    }
+
+    clearShieldTimers();
+    currentShieldModeRef.current = type;
+    waitingPlayRef.current = true;
+
+    if (type === 'start') {
+      setShieldState({
+        active: true,
+        title: 'DISHA SECURE PROTOCOL',
+        text: '📡 Connecting Disha Media Stream (Node #04)...',
+        progress: 20
+      });
+      // Safety fallback: if YouTube fails to send playerState===1 within 5.5s, lift shield anyway
+      shieldTimersRef.current.push(
+        setTimeout(() => {
+          if (waitingPlayRef.current) {
+            waitingPlayRef.current = false;
+            startDecryptionCountdown('start');
+          }
+        }, 5500)
       );
     } else if (type === 'seek') {
       const timeStr = typeof timeVal === 'number' ? formatTime(timeVal) : '';
       setShieldState({
         active: true,
-        title: 'Fast Keyframe Sync',
-        text: `⚡ Syncing Media Timestamp ${timeStr ? 'at ' + timeStr : ''}...`,
-        progress: 40
+        title: 'KEYFRAME RE-SYNC',
+        text: `⚡ Buffering Media Frame ${timeStr ? 'at ' + timeStr : ''}...`,
+        progress: 35
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '🔐 Re-decrypting Frame Buffer...', progress: 85 }));
-        }, 1200),
-        setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '✨ Stream Synced', progress: 100 }));
-        }, 2700),
-        setTimeout(() => {
-          setShieldState(s => ({ ...s, active: false }));
+          if (waitingPlayRef.current) {
+            waitingPlayRef.current = false;
+            startDecryptionCountdown('seek');
+          }
         }, 3500)
       );
     } else if (type === 'resume') {
       setShieldState({
         active: true,
-        title: 'Resuming Stream',
-        text: '⚡ Resuming Secure Playback...',
-        progress: 45
+        title: 'RESUMING STREAM',
+        text: '⚡ Resuming Secure Stream...',
+        progress: 40
       });
       shieldTimersRef.current.push(
         setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '🔐 Stabilizing CDN Buffer...', progress: 85 }));
-        }, 1200),
-        setTimeout(() => {
-          setShieldState(s => ({ ...s, text: '✨ Playback Active', progress: 100 }));
-        }, 2600),
-        setTimeout(() => {
-          setShieldState(s => ({ ...s, active: false }));
-        }, 3400)
+          if (waitingPlayRef.current) {
+            waitingPlayRef.current = false;
+            startDecryptionCountdown('resume');
+          }
+        }, 3000)
       );
     }
   };
 
   useEffect(() => {
     if (view === 'player' && activeVideo) {
-      triggerShield('start');
+      const isHls = Boolean(
+        activeVideo.hls_url || 
+        (activeVideo.video_id && activeVideo.video_id.includes('.m3u8'))
+      );
+      if (!isHls) {
+        triggerShield('start');
+      } else {
+        clearShieldTimers();
+        setShieldState({ active: false, title: '', text: '', progress: 100 });
+      }
     }
     return () => clearShieldTimers();
   }, [view, activeVideo]);
+
+  // Global instantaneous scroll to top on any navigation or state change
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [view, batchTab, folderStack.length, activeVideo?.id, selectedBatch?.id]);
 
   // Sync fullscreen change across browser / escape / orientation
   useEffect(() => {
@@ -173,7 +250,7 @@ export default function App() {
     };
   }, []);
 
-  // Poll time and status from YouTube Iframe
+  // Poll time and status from YouTube Iframe + Dynamic Play Detection
   useEffect(() => {
     if (view !== 'player' || !activeVideo) return;
     setCurrentTime(0);
@@ -191,7 +268,14 @@ export default function App() {
             setDuration(data.info.duration);
           }
           if (typeof data.info.playerState === 'number') {
-            setIsPlaying(data.info.playerState === 1);
+            const isNowPlaying = data.info.playerState === 1;
+            setIsPlaying(isNowPlaying);
+
+            // Dynamic Play Trigger: video frames are physically rendering!
+            if (isNowPlaying && waitingPlayRef.current) {
+              waitingPlayRef.current = false;
+              startDecryptionCountdown(currentShieldModeRef.current);
+            }
           }
         }
       } catch (err) {}
@@ -476,20 +560,41 @@ export default function App() {
   };
 
   // Open Video in Dedicated Player Page
-  const handlePlayVideo = (video) => {
+  const handlePlayVideo = async (video) => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    const isPlayable = Boolean(
-      video.video_id || 
-      video.hls_url || 
-      (typeof video.video_id === 'string' && video.video_id.includes('.m3u8'))
-    );
-    if (video.is_upcoming || video.live_status === 2 || !isPlayable) {
-      showToast(`⏰ यह लाइव क्लास ${video.date || 'निर्धारित समय'} पर शुरू होगी।`);
+    if (video.is_upcoming || video.live_status === 2) {
+      showToast(`⏰ This live class will start on ${video.date || 'scheduled time'}.`);
       return;
     }
-    setActiveVideo(video);
+
+    let playVideo = { ...video };
+    // If stream URL is not yet present, dynamically resolve via backend
+    if (!playVideo.video_id && !playVideo.hls_url && (selectedBatch?.id || video.course_id)) {
+      try {
+        const cId = selectedBatch?.id || video.course_id;
+        const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}`).then(r => r.json());
+        if (res && res.status === 200) {
+          playVideo.video_id = res.video_id || '';
+          playVideo.hls_url = res.hls_url || '';
+          playVideo.ytFlag = res.ytFlag || 0;
+        }
+      } catch (e) {
+        console.error('Failed to resolve video stream:', e);
+      }
+    }
+
+    const isPlayable = Boolean(
+      playVideo.video_id || 
+      playVideo.hls_url || 
+      (typeof playVideo.video_id === 'string' && playVideo.video_id.includes('.m3u8'))
+    );
+    if (!isPlayable) {
+      showToast(`⚠️ Class stream is currently unavailable.`);
+      return;
+    }
+    setActiveVideo(playVideo);
     setView('player');
-    pushHistory({ view: 'player', videoId: video.id });
+    pushHistory({ view: 'player', videoId: playVideo.id });
   };
 
   // HLS Player Hook (Handles Live broadcasts and recorded HLS streams)
@@ -581,10 +686,10 @@ export default function App() {
             <div className="space-y-4">
               <div className="flex items-center justify-between px-0.5">
                 <span className="text-xs font-bold text-zinc-400 tracking-wider uppercase">
-                  मेरे बैचेस (Purchased)
+                  My Batches
                 </span>
                 <span className="text-[11px] font-semibold text-zinc-500">
-                  {batches.length} एक्टिव बैच
+                  {batches.length} Active Batches
                 </span>
               </div>
 
@@ -604,9 +709,9 @@ export default function App() {
                   <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
                     <AlertCircle className="w-5 h-5" />
                   </div>
-                  <h4 className="text-xs font-bold text-white">कोई एक्टिव बैच नहीं मिला</h4>
+                  <h4 className="text-xs font-bold text-white">No Active Batches Found</h4>
                   <p className="text-[11px] text-zinc-500 max-w-xs mx-auto">
-                    सेशन रिफ्रेश करने के लिए नीचे दिए गए बटन पर क्लिक करें।
+                    Click the button below to reload session and batches.
                   </p>
                   <button 
                     onClick={() => {
@@ -615,7 +720,7 @@ export default function App() {
                     }}
                     className="px-4 py-2 rounded-lg text-xs font-bold bg-white text-black hover:bg-zinc-200 transition-colors shadow"
                   >
-                    रिफ्रेश करें (Reload Batches)
+                    Reload Batches
                   </button>
                 </div>
               ) : (
@@ -637,7 +742,7 @@ export default function App() {
                         />
                         <div className="absolute top-2.5 left-2.5">
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-black/85 text-emerald-400 border border-emerald-500/30 backdrop-blur-sm">
-                            सक्रिय • Lifetime
+                            Active • Lifetime
                           </span>
                         </div>
                       </div>
@@ -653,7 +758,7 @@ export default function App() {
                           className="w-full py-2.5 px-4 rounded-lg font-bold text-xs bg-white text-black hover:bg-zinc-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow"
                         >
                           <Play className="w-3.5 h-3.5 fill-black" />
-                          बैच देखें (Enter Batch)
+                          Enter Batch
                         </button>
                       </div>
                     </div>
@@ -684,7 +789,7 @@ export default function App() {
                     }`}
                   >
                     <Radio className={`w-3.5 h-3.5 ${batchTab === 'live' ? 'text-red-500' : ''}`} />
-                    लाइव (Live)
+                    Live
                   </button>
 
                   <button 
@@ -699,7 +804,7 @@ export default function App() {
                     }`}
                   >
                     <Folder className="w-3.5 h-3.5 text-amber-400" />
-                    कंटेंट (Content)
+                    Content
                   </button>
 
                   <button 
@@ -714,7 +819,7 @@ export default function App() {
                     }`}
                   >
                     <Award className="w-3.5 h-3.5 text-blue-400" />
-                    टेस्ट (Test)
+                    Test
                   </button>
                 </div>
               </div>
@@ -729,7 +834,7 @@ export default function App() {
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
                         <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
-                          लाइव क्लास अभी चल रही है (Live Now)
+                          Live Class Running Now
                         </span>
                       </div>
 
@@ -756,7 +861,7 @@ export default function App() {
                               {item.title}
                             </h4>
                             <p className="text-[10px] text-red-300 font-semibold mt-1">
-                              🔴 अभी लाइव देखें
+                              🔴 Watch Live Now
                             </p>
                           </div>
                         </div>
@@ -770,7 +875,7 @@ export default function App() {
                       <div className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-amber-400" />
                         <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                          आगामी लाइव क्लासेस (Upcoming Schedule)
+                          Upcoming Classes (Schedule)
                         </span>
                       </div>
 
@@ -788,19 +893,19 @@ export default function App() {
                             />
                             <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-[9px] font-black uppercase text-black tracking-wider flex items-center gap-1">
                               <Clock className="w-2.5 h-2.5" />
-                              आगामी
+                              Upcoming
                             </div>
                           </div>
 
                           <div className="min-w-0 flex-1">
                             <div className="inline-block px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[9px] font-bold mb-1">
-                              {item.date || 'शेड्यूल किया गया'}
+                              {item.date || 'Scheduled'}
                             </div>
                             <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
                               {item.title}
                             </h4>
                             <p className="text-[10px] text-zinc-400 mt-1">
-                              निर्धारित समय पर लाइव शुरू होगी
+                              Live broadcast will start at scheduled time
                             </p>
                           </div>
                         </div>
@@ -811,7 +916,7 @@ export default function App() {
                   {/* Recent Recorded Lectures */}
                   <div className="space-y-2 pt-1">
                     <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
-                      हाल के रिकॉर्डेड लेक्चर्स (Recent Lectures)
+                      Recent Recorded Lectures
                     </span>
 
                     {loadingOverview ? (
@@ -855,7 +960,7 @@ export default function App() {
                                 {video.title}
                               </h4>
                               <div className="text-[10px] text-zinc-500 mt-1.5">
-                                <span>{video.date || 'लेक्चर'}</span>
+                                <span>{video.date || 'Lecture'}</span>
                               </div>
                             </div>
                           </div>
@@ -941,7 +1046,7 @@ export default function App() {
                                 />
                                 {item.is_upcoming ? (
                                   <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-[8px] font-black uppercase text-black">
-                                    आगामी
+                                    Upcoming
                                   </div>
                                 ) : (
                                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
@@ -956,8 +1061,9 @@ export default function App() {
                                 <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
                                   {item.title}
                                 </h4>
-                                <div className="text-[10px] text-zinc-500 mt-1.5">
-                                  <span>{item.date || (item.is_upcoming ? 'आगामी क्लास' : 'लेक्चर')}</span>
+                                <div className="text-[10px] text-zinc-500 mt-1.5 flex items-center gap-1.5">
+                                  <span>{item.date || (item.is_upcoming ? 'Upcoming Class' : 'Lecture')}</span>
+                                  {item.duration && <span>• {item.duration}</span>}
                                 </div>
                               </div>
                             </div>
@@ -1029,7 +1135,7 @@ export default function App() {
                                   <h4 className="text-xs font-bold text-white truncate">
                                     {item.title}
                                   </h4>
-                                  <span className="text-[10px] text-zinc-500">बाहरी लिंक</span>
+                                  <span className="text-[10px] text-zinc-500">External Link</span>
                                 </div>
                               </div>
                               <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
@@ -1050,15 +1156,15 @@ export default function App() {
                   <div className="w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto">
                     <Award className="w-5 h-5" />
                   </div>
-                  <h4 className="text-xs font-bold text-white">ऑनलाइन टेस्ट सीरीज़</h4>
+                  <h4 className="text-xs font-bold text-white">Online Test Series</h4>
                   <p className="text-[11px] text-zinc-500 max-w-xs mx-auto">
-                    इस बैच के टेस्ट पेपर्स और ऑब्जेक्टिव क्विज़ कंटेंट फोल्डर में उपलब्ध हैं।
+                    Test papers and objective quizzes are organized inside the Content folders.
                   </p>
                   <button 
                     onClick={() => setBatchTab('content')}
                     className="px-4 py-2 rounded-lg text-xs font-bold bg-white text-black hover:bg-zinc-200 transition-colors shadow"
                   >
-                    कंटेंट फोल्डर में देखें
+                    View in Content Folder
                   </button>
                 </div>
               )}
@@ -1119,27 +1225,53 @@ export default function App() {
                         allowFullScreen
                       />
 
-                      {/* Pure Black Cyber Decryption Shield */}
+                      {/* Pure AMOLED Black Cyber Decryption Shield */}
                       {shieldState.active && (
-                        <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center transition-opacity duration-500 pointer-events-none select-none px-6">
-                          <div className="w-full max-w-[290px] p-4 rounded-2xl bg-[#09090c] border border-emerald-500/30 flex flex-col items-center gap-3 shadow-[0_0_40px_rgba(16,185,129,0.15)] backdrop-blur-md">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                              <span className="text-[11px] font-mono font-bold text-emerald-400 tracking-wider uppercase">
-                                {shieldState.title}
+                        <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center transition-opacity duration-300 pointer-events-none select-none px-4">
+                          <div className="w-full max-w-[320px] p-4 sm:p-5 rounded-2xl bg-[#08080c]/95 border border-emerald-500/30 flex flex-col items-center gap-3.5 shadow-[0_0_50px_rgba(16,185,129,0.18)] backdrop-blur-xl">
+                            {/* Top Header with Pulsing Dot */}
+                            <div className="w-full flex items-center justify-between border-b border-emerald-950/80 pb-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className="relative flex h-2.5 w-2.5">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                </span>
+                                <span className="text-[11px] font-mono font-extrabold text-emerald-400 tracking-widest uppercase">
+                                  {shieldState.title}
+                                </span>
+                              </div>
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
+                                AES-256
                               </span>
                             </div>
 
-                            <div className="w-full bg-zinc-900/90 h-1.5 rounded-full overflow-hidden border border-zinc-800/80">
-                              <div 
-                                className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 rounded-full transition-all duration-500 ease-out shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                                style={{ width: `${shieldState.progress}%` }}
-                              />
+                            {/* Glowing Progress Bar */}
+                            <div className="w-full space-y-1">
+                              <div className="w-full bg-zinc-950 h-2 rounded-full overflow-hidden border border-emerald-950 p-0.5">
+                                <div 
+                                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 rounded-full transition-all duration-300 ease-out shadow-[0_0_12px_rgba(16,185,129,0.8)]"
+                                  style={{ width: `${shieldState.progress}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between items-center text-[9px] font-mono text-zinc-500 px-0.5">
+                                <span>TUNNEL: SECURE</span>
+                                <span>{shieldState.progress}%</span>
+                              </div>
                             </div>
 
-                            <p className="text-[10px] text-zinc-300 font-mono tracking-tight text-center leading-snug animate-pulse">
-                              {shieldState.text}
-                            </p>
+                            {/* Telemetry Status Message */}
+                            <div className="w-full bg-black/60 border border-zinc-800/80 rounded-xl py-2 px-3 flex items-center justify-center gap-2">
+                              <span className="text-[10px] text-zinc-200 font-mono tracking-tight text-center leading-snug">
+                                {shieldState.text}
+                              </span>
+                            </div>
+
+                            {/* Mini Tech Spec Badges */}
+                            <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-400">
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">AUDIO: 320 KBPS</span>
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">NODE: #04-DEL</span>
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">1080P HD</span>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1160,7 +1292,7 @@ export default function App() {
                     <button 
                       onClick={togglePlayPause}
                       className="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center hover:bg-zinc-200 active:scale-95 transition-all shrink-0 shadow"
-                      title={isPlaying ? "पॉज़ करें (Pause)" : "प्ले करें (Play)"}
+                      title={isPlaying ? "Pause" : "Play"}
                     >
                       {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 fill-black ml-0.5" />}
                     </button>
@@ -1170,10 +1302,10 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
                           <span className="text-xs font-bold text-red-400 tracking-wider">
-                            🔴 LIVE (लाइव प्रसारण)
+                            🔴 LIVE STREAM
                           </span>
                         </div>
-                        <span className="text-[10px] text-zinc-400 font-medium font-mono">रियल-टाइम</span>
+                        <span className="text-[10px] text-zinc-400 font-medium font-mono">REAL-TIME</span>
                       </div>
                     ) : (
                       <div className="flex-1 flex flex-col justify-center">
@@ -1199,7 +1331,7 @@ export default function App() {
                   {isLive ? (
                     <div className="flex items-center gap-2 px-1 text-[11px] text-zinc-400 font-medium">
                       <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 animate-ping"></span>
-                      <span>🔴 लाइव प्रसारण रियल-टाइम में चल रहा है</span>
+                      <span>🔴 Live broadcast active in real-time</span>
                     </div>
                   ) : (
                     <>
@@ -1208,7 +1340,7 @@ export default function App() {
                         <button 
                           onClick={() => seekRelative(-10)}
                           className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
-                          title="10 सेकंड पीछे"
+                          title="10s Back"
                         >
                           <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
                           -10s
@@ -1216,7 +1348,7 @@ export default function App() {
                         <button 
                           onClick={() => seekRelative(10)}
                           className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
-                          title="10 सेकंड आगे"
+                          title="10s Forward"
                         >
                           +10s
                           <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
@@ -1246,17 +1378,17 @@ export default function App() {
                   <button 
                     onClick={toggleFullscreen}
                     className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all shrink-0 ml-auto"
-                    title={isFullscreen ? "छोटा करें (Short Screen)" : "फुलस्क्रीन (Full Screen)"}
+                    title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                   >
                     {isFullscreen ? (
                       <>
                         <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
-                        <span>छोटा करें</span>
+                        <span>Exit Fullscreen</span>
                       </>
                     ) : (
                       <>
                         <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="hidden sm:inline">फुलस्क्रीन</span>
+                        <span className="hidden sm:inline">Fullscreen</span>
                       </>
                     )}
                   </button>
@@ -1270,7 +1402,7 @@ export default function App() {
                     </h2>
                     <p className="text-[11px] text-zinc-500 mt-1.5 flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-zinc-400" />
-                      {activeVideo.date || 'लेक्चर विवरण'}
+                      {activeVideo.date || 'Lecture Details'}
                     </p>
                   </div>
 
@@ -1281,7 +1413,7 @@ export default function App() {
                       className="w-full py-2.5 px-3 rounded-lg text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 flex items-center justify-center gap-2 transition-all active:scale-[0.99] shadow cursor-pointer disabled:opacity-50"
                     >
                       <Download className="w-4 h-4" />
-                      {checkingPdf ? 'जाँच रहे हैं...' : 'क्लास नोट्स PDF डाउनलोड करें'}
+                      {checkingPdf ? 'Checking server...' : 'Download Class Notes PDF'}
                     </button>
                   )}
                 </div>
