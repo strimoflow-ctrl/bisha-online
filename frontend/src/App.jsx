@@ -581,10 +581,10 @@ export default function App() {
     }
 
     let playVideo = { ...video };
-    // If stream URL is not yet present, dynamically resolve via backend
-    if (!playVideo.video_id && !playVideo.hls_url && (selectedBatch?.id || video.course_id)) {
+    // If stream or embed URL is not yet present, dynamically resolve via backend
+    if (!playVideo.video_id || (!playVideo.hls_url && !playVideo.embed_player_url)) {
       try {
-        const cId = selectedBatch?.id || video.course_id || '65';
+        const cId = selectedBatch?.id || video.course_id || '62';
         showToast('🔄 Connecting class stream...');
         const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}`).then(r => r.json());
         if (res && res.status === 200) {
@@ -593,9 +593,16 @@ export default function App() {
             const root = API_BASE_URL.replace(/\/api\/?$/, '');
             hls = `${root}${hls}`;
           }
-          playVideo.video_id = res.video_id || '';
+          let embed = res.embed_player_url || '';
+          if (embed && embed.startsWith('/api')) {
+            const root = API_BASE_URL.replace(/\/api\/?$/, '');
+            embed = `${root}${embed}`;
+          }
+          playVideo.video_id = res.video_id || playVideo.video_id || '';
           playVideo.hls_url = hls;
-          playVideo.ytFlag = res.ytFlag || 0;
+          playVideo.embed_player_url = embed;
+          playVideo.ytFlag = res.ytFlag ?? playVideo.ytFlag ?? 0;
+          playVideo.player_type = res.player_type || '';
         }
       } catch (e) {
         console.error('Failed to resolve video stream:', e);
@@ -605,6 +612,7 @@ export default function App() {
     const isPlayable = Boolean(
       playVideo.video_id || 
       playVideo.hls_url || 
+      playVideo.embed_player_url ||
       (typeof playVideo.video_id === 'string' && playVideo.video_id.includes('.m3u8'))
     );
     if (!isPlayable) {
@@ -1240,7 +1248,17 @@ export default function App() {
                     </button>
                   )}
 
-                  {isHls ? (
+                  {activeVideo.embed_player_url ? (
+                    <div className="relative w-full h-full flex items-center justify-center bg-black">
+                      <iframe 
+                        src={activeVideo.embed_player_url}
+                        title={activeVideo.title}
+                        className="w-full h-full border-0 pointer-events-auto"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : isHls ? (
                     <div className="relative w-full h-full flex items-center justify-center bg-black">
                       <video 
                         ref={videoRef}
@@ -1327,8 +1345,8 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Custom Controls (ONLY for YouTube - HLS uses native controls) */}
-                {!isHls && (
+                {/* Custom Controls (ONLY for YouTube - HLS and Appx embed use native controls) */}
+                {!isHls && !activeVideo.embed_player_url && (
                   <>
                     {/* Timeline Progress Seekbar */}
                     <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-3 space-y-2 shadow">

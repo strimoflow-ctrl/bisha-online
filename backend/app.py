@@ -10,7 +10,8 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 # Load environment variables from .env file
-load_dotenv()
+ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(ENV_PATH)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -18,20 +19,36 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # Constants & Configuration from Environment
 BASE_URL = os.environ.get("DISHA_BASE_URL", "https://dishaonlineclassesapi.akamai.net.in/")
 CLIENT_SERVICE = os.environ.get("DISHA_CLIENT_SERVICE", "Appx")
-AUTH_KEY = os.environ.get("DISHA_AUTH_KEY", "")
-AES_KEY = os.environ.get("DISHA_AES_KEY", "")
+AUTH_KEY = os.environ.get("DISHA_AUTH_KEY", "appxapi")
+AES_KEY = os.environ.get("DISHA_AES_KEY", "638udh3829162018")
 DEFAULT_IV = os.environ.get("DISHA_DEFAULT_IV", "ZmVkY2JhOTg3NjU0MzIxMA==")
 
 SESSION_FILE = os.path.join(os.path.dirname(__file__), "session.json")
-DISHA_EMAIL = os.environ.get("DISHA_EMAIL", "")
-DISHA_PASSWORD = os.environ.get("DISHA_PASSWORD", "")
+DISHA_EMAIL = os.environ.get("DISHA_EMAIL") or "hkb4390@gmail.com"
+DISHA_PASSWORD = os.environ.get("DISHA_PASSWORD") or "hkb4390"
+
+ACTIVE_SESSION = None
 
 def load_session():
+    global ACTIVE_SESSION
+    if ACTIVE_SESSION:
+        return ACTIVE_SESSION
+
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+                s = json.load(f)
+                if s and s.get("token"):
+                    ACTIVE_SESSION = s
+                    return ACTIVE_SESSION
+        except Exception:
+            pass
+
     token = os.environ.get("DISHA_TOKEN")
     user_id = os.environ.get("DISHA_USER_ID")
     
     if token and user_id:
-        return {
+        ACTIVE_SESSION = {
             "user_id": user_id,
             "token": token,
             "name": os.environ.get("DISHA_USER_NAME", "Disha Pro Student"),
@@ -39,17 +56,13 @@ def load_session():
             "email": os.environ.get("DISHA_USER_EMAIL", ""),
             "is_paid_user": "1"
         }
+        return ACTIVE_SESSION
         
-    if os.path.exists(SESSION_FILE):
-        try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
     return None
 
 def perform_login(email=DISHA_EMAIL, password=DISHA_PASSWORD):
     """Auto re-login when session expires"""
+    global ACTIVE_SESSION
     url = f"{BASE_URL}post/userLogin"
     data = {"email": email, "password": password}
     headers = {
@@ -66,15 +79,21 @@ def perform_login(email=DISHA_EMAIL, password=DISHA_PASSWORD):
             if res_json.get("status") == 200:
                 ud = res_json.get("data", {})
                 sess = {
-                    "user_id": ud.get("userid"),
-                    "token": ud.get("token"),
+                    "user_id": str(ud.get("userid")),
+                    "token": str(ud.get("token")),
                     "name": ud.get("name"),
                     "email": ud.get("email"),
                     "phone": ud.get("phone"),
                     "is_paid_user": ud.get("is_paid_user")
                 }
-                with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                    json.dump(sess, f, indent=2, ensure_ascii=False)
+                ACTIVE_SESSION = sess
+                os.environ["DISHA_TOKEN"] = sess["token"]
+                os.environ["DISHA_USER_ID"] = sess["user_id"]
+                try:
+                    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+                        json.dump(sess, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
                 print("[+] Auto-relogin successful!")
                 return sess
     except Exception as e:
@@ -92,7 +111,7 @@ def make_disha_request(url, retry=True):
         else:
             try:
                 j = r.json()
-                if j.get("status") == 401:
+                if j.get("status") in [401, "401"] or j.get("message") == "Unauthorized.":
                     is_401 = True
             except Exception:
                 pass
@@ -378,30 +397,12 @@ def api_batch_folders(course_id):
                     decrypted_video_id = ""
                     yt_flag = 0
                 
-                # If neither youtube id nor hls stream found in folder item, resolve via fetchVideoDetailsById
-                if not decrypted_video_id and not hls_stream and item_id:
-                    try:
-                        r_det = make_disha_request(f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={item_id}&ytflag=0&folder_wise_course=1").json()
-                        d_data = r_det.get("data", {})
-                        if isinstance(d_data, dict):
-                            enc_links = d_data.get("encrypted_links", [])
-                            if enc_links and isinstance(enc_links, list):
-                                first_path = enc_links[0].get("path") or enc_links[0].get("backup_url") or ""
-                                if first_path:
-                                    dec_stream = decrypt_val(first_path)
-                                    if ".m3u8" in dec_stream.lower():
-                                        hls_stream = dec_stream
-                                        yt_flag = 0
-                    except Exception:
-                        pass
-                
-                clean_pdf = sanitize_pdf_link(it.get("pdf_link") or it.get("pdf_link2") or "")
-                live_status = int(it.get("live_status", 3))
-                
                 entry["ytFlag"] = yt_flag
                 entry["video_id"] = decrypted_video_id
                 entry["video_player_url"] = it.get("video_player_url") or ""
                 entry["hls_url"] = hls_stream
+                entry["embed_player_url"] = ""
+                entry["course_id"] = str(course_id)
                 entry["pdf_link"] = clean_pdf
                 entry["has_notes"] = bool(clean_pdf)
                 entry["live_status"] = live_status
@@ -431,7 +432,7 @@ def api_batch_folders(course_id):
 
 @app.route("/api/batch/<course_id>/video/<video_id>", methods=["GET"])
 def api_batch_video_details(course_id, video_id):
-    """Dynamically resolves encrypted HLS streams and YouTube IDs for a video using multiple query variants"""
+    """Dynamically resolves encrypted HLS streams, embedded Appx players, and YouTube IDs for a video"""
     try:
         urls_to_try = [
             f"{BASE_URL}get/fetchVideoDetailsById?course_id={course_id}&video_id={video_id}&ytflag=0&folder_wise_course=1",
@@ -445,6 +446,7 @@ def api_batch_video_details(course_id, video_id):
         hls_stream = ""
         yt_id = ""
         yt_flag = 0
+        embed_player_url = ""
         debug_collected = {}
 
         for u in urls_to_try:
@@ -456,7 +458,16 @@ def api_batch_video_details(course_id, video_id):
                 debug_collected[param_key] = data
                 
                 if isinstance(data, dict):
-                    # 1. Check encrypted_links for HLS m3u8
+                    # 1. Check Appx video_player_token for official embedded web player
+                    tok = str(data.get("video_player_token") or "").strip()
+                    if tok and tok != "1234":
+                        base_p = str(data.get("video_player_url") or "")
+                        if not base_p or "token=" not in base_p:
+                            base_p = "https://appx-play.classx.co.in/combined-img-player?isMobile=true&debug=true&token="
+                        full_target = f"{base_p}{tok}"
+                        embed_player_url = f"/api/disha-player?url={requests.utils.quote(full_target)}"
+
+                    # 2. Check encrypted_links for HLS m3u8
                     enc_links = data.get("encrypted_links", [])
                     if enc_links and isinstance(enc_links, list):
                         for el in enc_links:
@@ -466,7 +477,7 @@ def api_batch_video_details(course_id, video_id):
                                 if ".m3u8" in dec_stream.lower() and not hls_stream:
                                     hls_stream = dec_stream
 
-                    # 2. Check direct file_link or video_id
+                    # 3. Check direct file_link or video_id
                     raw_link = data.get("file_link") or data.get("video_id") or ""
                     if raw_link:
                         dec = decrypt_val(raw_link)
@@ -482,11 +493,11 @@ def api_batch_video_details(course_id, video_id):
                                 yt_id = m.group(1)
                                 yt_flag = 1
 
-                    # 3. Check recording_hls
+                    # 4. Check recording_hls
                     if not hls_stream and data.get("recording_hls"):
                         hls_stream = data.get("recording_hls")
                     
-                    # 4. Check clean video_id attribute
+                    # 5. Check clean video_id attribute
                     if not yt_id and not hls_stream and data.get("ytFlag") == 1 and data.get("video_id"):
                         raw_vid = str(data.get("video_id"))
                         dec_vid = decrypt_val(raw_vid)
@@ -494,7 +505,7 @@ def api_batch_video_details(course_id, video_id):
                             yt_id = dec_vid
                             yt_flag = 1
 
-                if hls_stream or yt_id:
+                if embed_player_url or hls_stream or yt_id:
                     break
             except Exception as ex:
                 debug_collected[u] = str(ex)
@@ -504,16 +515,50 @@ def api_batch_video_details(course_id, video_id):
         if hls_stream and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):
             final_hls = f"/api/proxy-hls?url={requests.utils.quote(hls_stream)}"
 
+        player_type = "youtube" if yt_id else ("embed" if embed_player_url else ("hls" if final_hls else ""))
+
         return jsonify({
             "status": 200,
             "video_id": yt_id,
             "hls_url": final_hls,
             "raw_hls_url": hls_stream,
+            "embed_player_url": embed_player_url,
+            "player_type": player_type,
             "ytFlag": yt_flag,
             "debug": debug_collected
         })
     except Exception as e:
         return jsonify({"status": 500, "error": str(e)}), 500
+
+@app.route("/api/disha-player", methods=["GET"])
+def api_disha_player():
+    """Proxies Appx protected web player for DRM/encrypted recorded lecture streams"""
+    target_url = request.args.get("url")
+    if not target_url:
+        return "Missing URL", 400
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": "https://player.appx.co.in/"
+    }
+    
+    try:
+        r = requests.get(target_url, headers=headers, timeout=15)
+        if r.status_code != 200:
+            return f"Player Error {r.status_code}", r.status_code
+            
+        html = r.text
+        # Inject base tag so all relative chunks, JS, CSS resolve to Appx CDN cleanly
+        if "<head>" in html:
+            html = html.replace("<head>", '<head><base href="https://appx-play.classx.co.in/">')
+            
+        resp = Response(html, status=200, mimetype="text/html")
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["X-Frame-Options"] = "ALLOWALL"
+        resp.headers["Content-Security-Policy"] = "frame-ancestors *"
+        return resp
+    except Exception as e:
+        return f"Error loading player: {e}", 500
 
 @app.route("/api/proxy-hls", methods=["GET"])
 def proxy_hls():
