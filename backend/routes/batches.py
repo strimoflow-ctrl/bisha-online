@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from config import BASE_URL, SIBLING_COURSE_MAP
+from config import BASE_URL, SIBLING_COURSE_MAP, BUILTIN_BATCH_CATALOG
 from crypto_utils import decrypt_val, sanitize_pdf_link
 from disha_client import make_disha_request
 from cache_manager import (
@@ -14,34 +14,71 @@ batches_bp = Blueprint("batches", __name__)
 def api_batches():
     # 1. Check Cache / Firebase
     cached = get_cached_batches()
-    if cached:
+    if cached and cached.get("count", 0) >= len(BUILTIN_BATCH_CATALOG):
         return jsonify(cached)
 
     def _fetch():
-        url = f"{BASE_URL}get/mycoursev2"
-        r = make_disha_request(url, course_id="default")
+        catalog_list = []
+        # Try fetching public courselistnewv2
         try:
-            data = r.json()
+            url_all = f"{BASE_URL}get/courselistnewv2?exam_name=&start=-1&userid=0"
+            r = make_disha_request(url_all, course_id="default")
+            raw_data = r.json().get("data", []) if hasattr(r, 'json') else []
+            if isinstance(raw_data, list):
+                for b in raw_data:
+                    if str(b.get("type", "COURSE")).upper() == "COURSE" and b.get("id"):
+                        catalog_list.append({
+                            "id": str(b.get("id")),
+                            "title": (b.get("course_name") or b.get("name") or "दिशा बैच").strip(),
+                            "thumbnail": b.get("course_thumbnail") or b.get("thumbnail") or "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png",
+                            "expiry": b.get("validity") or "Lifetime Validity",
+                            "teacher_name": b.get("teacher_name") or "Disha Teachers Team",
+                            "is_paid": "1"
+                        })
         except Exception:
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
-        courses = data.get("data", [])
-        if not isinstance(courses, list):
-            courses = []
-        
-        cleaned = []
-        for c in courses:
-            cleaned.append({
-                "id": str(c.get("id")),
-                "title": c.get("course_name") or c.get("title") or "दिशा बैच",
-                "thumbnail": c.get("course_thumbnail") or c.get("small_course_logo") or "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png",
-                "expiry": c.get("expiry") or "Lifetime Validity",
-                "teacher_name": c.get("teacher_name") or "Disha Teachers Team",
+            pass
+
+        # Try user's purchased courses
+        try:
+            url_my = f"{BASE_URL}get/mycoursev2"
+            r_my = make_disha_request(url_my, course_id="default")
+            my_courses = r_my.json().get("data", []) if hasattr(r_my, 'json') else []
+            if isinstance(my_courses, list):
+                for b in my_courses:
+                    catalog_list.append({
+                        "id": str(b.get("id")),
+                        "title": (b.get("course_name") or b.get("name") or "दिशा बैच").strip(),
+                        "thumbnail": b.get("course_thumbnail") or b.get("thumbnail") or "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png",
+                        "expiry": b.get("expiry") or b.get("validity") or "Lifetime Validity",
+                        "teacher_name": b.get("teacher_name") or "Disha Teachers Team",
+                        "is_paid": "1"
+                    })
+        except Exception:
+            pass
+
+        # Format Built-in catalog from all 16 accounts (25 complete batches)
+        builtin_formatted = []
+        for b in BUILTIN_BATCH_CATALOG:
+            builtin_formatted.append({
+                "id": str(b.get("id")),
+                "title": (b.get("name") or b.get("course_name") or "दिशा बैच").strip(),
+                "thumbnail": b.get("thumbnail") or "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png",
+                "expiry": b.get("validity") or "Lifetime Validity",
+                "teacher_name": "Disha Teachers Team",
                 "is_paid": "1"
             })
-            
-        res = {"status": 200, "count": len(cleaned), "batches": cleaned}
+
+        # Merge and deduplicate by ID
+        seen = set()
+        merged = []
+        for item in catalog_list + builtin_formatted:
+            iid = str(item.get("id"))
+            if not iid or iid in seen:
+                continue
+            seen.add(iid)
+            merged.append(item)
+
+        res = {"status": 200, "count": len(merged), "batches": merged}
         save_cached_batches(res)
         return res
 
