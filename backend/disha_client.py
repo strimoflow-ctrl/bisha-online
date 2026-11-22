@@ -47,11 +47,27 @@ def make_disha_request(url, course_id=None, method="GET", data=None, timeout=12)
     if not url.startswith("http"):
         url = f"{BASE_URL}{url.lstrip('/')}"
 
-    candidates = get_candidate_owners_for_course(course_id) if course_id else []
+    # Default to course "default" or "62" when fetching general endpoints (like batches list)
+    eff_course_id = course_id or "default"
+    candidates = get_candidate_owners_for_course(eff_course_id)
+    
     if not candidates:
         sess = load_session()
-        if sess:
+        if not sess:
+            sess = perform_login()
+        if sess and sess.get("user_id") and sess.get("token"):
             candidates = [{"userId": sess["user_id"], "token": sess["token"]}]
+
+    if not candidates:
+        pool = load_account_pool()
+        for k in ["default", "62", "58", "61", "57", "63", "70", "89"]:
+            if k in pool and pool[k].get("userId") and pool[k].get("token"):
+                candidates.append({"userId": pool[k]["userId"], "token": pool[k]["token"]})
+                break
+
+    # Guard against empty candidates to completely eliminate IndexError
+    if not candidates:
+        candidates = [{}]
 
     # Try up to 3 candidate accounts
     attempts = max(1, min(len(candidates), 3))

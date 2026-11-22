@@ -19,9 +19,16 @@ def api_batches():
 
     def _fetch():
         url = f"{BASE_URL}get/mycoursev2"
-        r = make_disha_request(url)
-        data = r.json()
+        r = make_disha_request(url, course_id="default")
+        try:
+            data = r.json()
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
         courses = data.get("data", [])
+        if not isinstance(courses, list):
+            courses = []
         
         cleaned = []
         for c in courses:
