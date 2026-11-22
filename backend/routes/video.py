@@ -63,10 +63,7 @@ def api_batch_video(course_id, video_id):
                         # A. Check Appx video_player_token
                         tok = str(data.get("video_player_token") or "").strip()
                         if tok and tok != "1234":
-                            base_p = str(data.get("video_player_url") or "")
-                            if not base_p or "token=" not in base_p:
-                                base_p = "https://appx-play.classx.co.in/combined-img-player?isMobile=true&token="
-                            embed_player_url = f"/combined-img-player?isMobile=true&token={tok}"
+                            hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
 
                         # B. Check direct file_link or video_id
                         raw_link = data.get("file_link") or data.get("video_id") or ""
@@ -123,7 +120,7 @@ def api_batch_video(course_id, video_id):
                 debug_collected["gbdoc_fallback_err"] = str(fb_err)
 
         final_hls = hls_stream
-        if hls_stream and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):
+        if hls_stream and hls_stream.startswith("http") and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):
             final_hls = f"/api/proxy-hls?url={requests.utils.quote(hls_stream)}"
 
         player_type = "youtube" if yt_id else ("embed" if embed_player_url else ("hls" if final_hls else ""))

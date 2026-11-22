@@ -1310,18 +1310,7 @@ export default function App() {
                     </button>
                   )}
 
-                  {activeVideo.embed_player_url ? (
-                    <div className="relative w-full h-full flex items-center justify-center bg-black">
-                      <iframe 
-                        ref={iframeRef}
-                        src={activeVideo.embed_player_url}
-                        title={activeVideo.title}
-                        className="w-full h-full border-0 pointer-events-auto"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                        allowFullScreen
-                      />
-                    </div>
-                  ) : isHls ? (
+                  {isHls ? (
                     <div className="relative w-full h-full flex items-center justify-center bg-black">
                       <video 
                         ref={videoRef}
@@ -1333,6 +1322,17 @@ export default function App() {
                         onLoadedMetadata={(e) => setDuration(e.target.duration || 0)}
                         onPlay={() => setIsPlaying(true)}
                         onPause={() => setIsPlaying(false)}
+                      />
+                    </div>
+                  ) : activeVideo.embed_player_url ? (
+                    <div className="relative w-full h-full flex items-center justify-center bg-black">
+                      <iframe 
+                        ref={iframeRef}
+                        src={activeVideo.embed_player_url}
+                        title={activeVideo.title}
+                        className="w-full h-full border-0 pointer-events-auto"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                        allowFullScreen
                       />
                     </div>
                   ) : (

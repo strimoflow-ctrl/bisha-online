@@ -6,6 +6,14 @@ from urllib.parse import urlparse, urljoin, quote, unquote
 from flask import Blueprint, Response, request, jsonify
 from crypto_utils import decrypt_xor28_pdf, is_allowed_media_url
 from .shim_data import SHIM_TEMPLATE
+from appx_hls import (
+    warm_and_extract_appx_token, 
+    decode_appx_segment_text, 
+    decode_appx_segment_binary, 
+    unscramble_appx_ts
+)
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 
 import time
 
@@ -428,3 +436,126 @@ def proxy_pdf():
         """, 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ============================================================================
+# Native Appx Decrypted HLS Manifest & Stream Endpoints (Pure HTML5 Video)
+# ============================================================================
+@proxy_bp.route("/api/disha/appx-hls", methods=["GET"])
+@proxy_bp.route("/api/disha/appx-hls/<name>", methods=["GET"])
+def api_disha_appx_hls(name=None):
+    token = request.args.get("token", "").strip()
+    requested_q = request.args.get("q", "").strip()
+    if not token:
+        return "Missing stream token", 400
+
+    entry = warm_and_extract_appx_token(token)
+    if not entry:
+        return "Stream token expired or unavailable", 404
+
+    active_variant = (requested_q and entry.get("qualities_map", {}).get(requested_q)) or {
+        "hls_key": entry["hls_key"],
+        "m3u8_text": entry["m3u8_text"]
+    }
+
+    lines = active_variant["m3u8_text"].splitlines()
+    out_lines = []
+    media_sequence = 0
+    current_iv_hex = ""
+    seg_idx = 0
+    has_end_list = False
+    q_param = f"&q={quote(requested_q)}" if requested_q else ""
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+            m = re.search(r"#EXT-X-MEDIA-SEQUENCE:(\d+)", line, re.IGNORECASE)
+            if m:
+                media_sequence = int(m.group(1))
+            out_lines.append(line)
+            continue
+
+        if line.startswith("#EXT-X-KEY:"):
+            m = re.search(r"IV=0x([0-9a-fA-F]{32})", line, re.IGNORECASE)
+            if m:
+                current_iv_hex = m.group(1).lower()
+            # Omit #EXT-X-KEY because /api/disha/appx-seg delivers fully decrypted MPEG-TS
+            continue
+
+        if line == "#EXT-X-ENDLIST":
+            has_end_list = True
+            out_lines.append(line)
+            continue
+
+        if line.startswith("http://") or line.startswith("https://"):
+            iv_for_seg = current_iv_hex or f"{media_sequence + seg_idx:032x}"
+            idx_now = seg_idx
+            seg_idx += 1
+            out_lines.append(f"/api/disha/appx-seg/seg-{idx_now}.ts?t={quote(token)}{q_param}&iv={iv_for_seg}&u={quote(line)}")
+            continue
+
+        out_lines.append(line)
+
+    if not has_end_list:
+        out_lines.append("#EXT-X-ENDLIST")
+
+    resp = Response("\n".join(out_lines) + "\n", status=200, mimetype="application/vnd.apple.mpegurl")
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+@proxy_bp.route("/api/disha/appx-seg", methods=["GET"])
+@proxy_bp.route("/api/disha/appx-seg/<name>", methods=["GET"])
+def api_disha_appx_seg(name=None):
+    token = request.args.get("t", "").strip()
+    requested_q = request.args.get("q", "").strip()
+    iv_hex = request.args.get("iv", "").strip()
+    seg_url = request.args.get("u", "").strip()
+    if not token or not seg_url:
+        return "Invalid segment parameters", 400
+
+    entry = warm_and_extract_appx_token(token)
+    if not entry:
+        return "Token session not found", 404
+
+    active_key = (requested_q and entry.get("qualities_map", {}).get(requested_q, {}).get("hls_key")) or entry["hls_key"]
+    hls_iv = bytes.fromhex(iv_hex) if (iv_hex and len(iv_hex) == 32) else (b"\x00" * 16)
+
+    m_ext = re.search(r"(\.ts[a-z]?)(?:\?|$)", seg_url, re.IGNORECASE)
+    ext = m_ext.group(1).lower() if m_ext else ".tsd"
+
+    seg_headers = {
+        "User-Agent": BROWSER_UA,
+        "Origin": APPX_PLAY_ORIGIN,
+        "Referer": f"{APPX_PLAY_ORIGIN}/"
+    }
+
+    try:
+        r = requests.get(seg_url, headers=seg_headers, timeout=20)
+        if r.status_code != 200:
+            return f"Upstream segment HTTP {r.status_code}", r.status_code
+
+        # Layer 1 & 2: Decode wrapper + AES-128-CBC decrypt
+        cipher = Cipher(algorithms.AES(active_key), modes.CBC(hls_iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+
+        if ext == ".ts":
+            decrypted = decryptor.update(r.content) + decryptor.finalize()
+        elif ext in [".tsf", ".tsg", ".tsh", ".tsi", ".tsj"]:
+            enc_bytes = decode_appx_segment_binary(r.content, ext)
+            decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
+        else:
+            enc_bytes = decode_appx_segment_text(r.text, ext)
+            decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
+
+        # Layer 3: Unscramble Appx PES payload bitwise NOT and PTS XOR timestamps
+        clean_ts = unscramble_appx_ts(decrypted, entry.get("uhs_version", 3.0))
+
+        resp = Response(clean_ts, status=200, mimetype="video/mp2t")
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+    except Exception as e:
+        return f"Segment decrypt error: {e}", 500
