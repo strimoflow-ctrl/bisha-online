@@ -7,10 +7,15 @@ from flask import Blueprint, Response, request, jsonify
 from crypto_utils import decrypt_xor28_pdf, is_allowed_media_url
 from .shim_data import SHIM_TEMPLATE
 
+import time
+
 proxy_bp = Blueprint("proxy", __name__)
 
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 APPX_PLAY_ORIGIN = "https://appx-play.classx.co.in"
+
+# Cache for rendered player HTML so single-use Appx video_player_token is never consumed twice
+APPX_PLAYER_HTML_CACHE = {}  # { clean_target: (html, expire_time) }
 
 def build_native_appx_player_shim(base_url: str, pathname_and_query: str) -> str:
     """
@@ -100,6 +105,18 @@ def _render_disha_player(target_url: str):
     clean_target = target_url.replace("&debug=true", "").replace("?debug=true&", "?").replace("?debug=true", "")
     pathname_and_query = parsed.path + ("?" + parsed.query if parsed.query else "")
 
+    now = time.time()
+    # 1. Return cached HTML so single-use token is never consumed multiple times by player workers
+    cached_entry = APPX_PLAYER_HTML_CACHE.get(clean_target)
+    if cached_entry:
+        cached_html, exp = cached_entry
+        if exp > now:
+            resp = Response(cached_html, status=200, mimetype="text/html; charset=utf-8")
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["X-Frame-Options"] = "ALLOWALL"
+            resp.headers["Content-Security-Policy"] = "frame-ancestors *"
+            return resp
+
     headers = {
         "User-Agent": BROWSER_UA,
         "Referer": "https://dishaonlineclasses.classx.co.in/",
@@ -109,6 +126,10 @@ def _render_disha_player(target_url: str):
     try:
         r = requests.get(clean_target, headers=headers, timeout=15)
         if r.status_code != 200:
+            if cached_entry:
+                resp = Response(cached_entry[0], status=200, mimetype="text/html; charset=utf-8")
+                resp.headers["Access-Control-Allow-Origin"] = "*"
+                return resp
             return f"Player Error {r.status_code}", r.status_code
 
         html = r.text
@@ -127,12 +148,20 @@ def _render_disha_player(target_url: str):
         else:
             html = f"{shim}{watermark_style}{html}"
 
+        # Cache only when HTML contains valid stream metadata and not expired
+        if "Token Expired" not in html and ("__next_f" in html or "kstr" in html or "uhs" in html):
+            APPX_PLAYER_HTML_CACHE[clean_target] = (html, now + 7200)
+
         resp = Response(html, status=200, mimetype="text/html; charset=utf-8")
         resp.headers["Access-Control-Allow-Origin"] = "*"
         resp.headers["X-Frame-Options"] = "ALLOWALL"
         resp.headers["Content-Security-Policy"] = "frame-ancestors *"
         return resp
     except Exception as e:
+        if cached_entry:
+            resp = Response(cached_entry[0], status=200, mimetype="text/html; charset=utf-8")
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
         return f"Error loading player: {e}", 500
 
 @proxy_bp.route("/combined-img-player", methods=["GET"])

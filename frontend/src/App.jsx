@@ -307,6 +307,28 @@ export default function App() {
     };
   }, [view, activeVideo]);
 
+  // Trigger auto-play on protected Appx player iframe once mounted
+  useEffect(() => {
+    if (view === 'player' && activeVideo?.embed_player_url) {
+      const sendPlay = () => {
+        try {
+          if (iframeRef.current && iframeRef.current.contentWindow) {
+            iframeRef.current.contentWindow.postMessage({ type: 'play', event: 'play' }, '*');
+          }
+        } catch (e) {}
+      };
+      sendPlay();
+      const t1 = setTimeout(sendPlay, 600);
+      const t2 = setTimeout(sendPlay, 1400);
+      const t3 = setTimeout(sendPlay, 2500);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+      };
+    }
+  }, [view, activeVideo?.embed_player_url]);
+
   // Fullscreen / Landscape toggle
   const toggleFullscreen = () => {
     if (!playerContainerRef.current) return;
@@ -1291,6 +1313,7 @@ export default function App() {
                   {activeVideo.embed_player_url ? (
                     <div className="relative w-full h-full flex items-center justify-center bg-black">
                       <iframe 
+                        ref={iframeRef}
                         src={activeVideo.embed_player_url}
                         title={activeVideo.title}
                         className="w-full h-full border-0 pointer-events-auto"

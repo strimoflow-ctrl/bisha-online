@@ -15,10 +15,13 @@ def api_batch_video(course_id, video_id):
     clean_id = str(course_id).split("_")[-1] if "_" in str(course_id) else str(course_id)
     effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId", clean_id)
 
-    # 1. Check Video Cache first (Eliminates repeated hits and prevents 4002 quota limit)
+    # 1. Check Video Cache first (Reusable for YouTube and unexpiring HLS streams)
     cached = get_cached_video(effective_id, video_id)
     if cached:
-        return jsonify(cached)
+        # If it's YouTube or static direct HLS stream, cache is 100% safe to reuse
+        if cached.get("ytFlag") == 1 or (cached.get("hls_url") and not cached.get("embed_player_url")):
+            return jsonify(cached)
+        # Appx embed_player_url uses single-use tokens, so we resolve fresh token below
 
     def _resolve_video():
         hls_stream = ""
@@ -136,8 +139,8 @@ def api_batch_video(course_id, video_id):
             "debug": debug_collected
         }
 
-        # Cache playable responses so future requests never consume quota
-        if yt_id or embed_player_url or final_hls:
+        # Cache static playable streams (YouTube and unexpiring HLS), but avoid caching single-use tokens permanently
+        if yt_id or (final_hls and not embed_player_url):
             save_cached_video(effective_id, video_id, res_payload)
 
         return res_payload
