@@ -81,7 +81,13 @@ def make_disha_request(url, course_id=None, method="GET", data=None, timeout=12)
 
             # Token expired (401 or 403)
             if resp.status_code in (401, 403):
-                perform_login()
+                cand_email = cand.get("email")
+                cand_pwd = cand.get("password")
+                owner_key = cand.get("ownerKey")
+                if cand_email and cand_pwd:
+                    perform_login(email=cand_email, password=cand_pwd, course_key=owner_key)
+                else:
+                    perform_login()
                 continue
 
         except Exception as e:

@@ -42,9 +42,14 @@ def load_session():
         return ACTIVE_SESSION
     return None
 
-def perform_login(email=DISHA_EMAIL, password=DISHA_PASSWORD):
-    """Auto re-login when session expires"""
-    global ACTIVE_SESSION
+def perform_login(email=None, password=None, course_key=None):
+    """Auto re-login when session or pool token expires"""
+    global ACTIVE_SESSION, ACCOUNT_POOL
+    email = email or DISHA_EMAIL
+    password = password or DISHA_PASSWORD
+    if not email or not password:
+        return None
+
     url = f"{BASE_URL}post/userLogin"
     data = {"email": email, "password": password}
     headers = {
@@ -54,7 +59,7 @@ def perform_login(email=DISHA_EMAIL, password=DISHA_PASSWORD):
         "Content-Type": "application/x-www-form-urlencoded"
     }
     try:
-        print(f"[*] Auto-relogging in as {email}...")
+        print(f"[*] Auto-logging in as {email} for batch {course_key or 'default'}...")
         resp = requests.post(url, data=data, headers=headers, timeout=12)
         if resp.status_code == 200:
             res_json = resp.json()
@@ -68,18 +73,26 @@ def perform_login(email=DISHA_EMAIL, password=DISHA_PASSWORD):
                     "phone": ud.get("phone"),
                     "is_paid_user": ud.get("is_paid_user")
                 }
-                ACTIVE_SESSION = sess
-                os.environ["DISHA_TOKEN"] = sess["token"]
-                os.environ["DISHA_USER_ID"] = sess["user_id"]
-                try:
-                    with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                        json.dump(sess, f, indent=2, ensure_ascii=False)
-                except Exception:
-                    pass
-                print("[+] Auto-relogin successful!")
+                
+                # Update specific account in pool if course_key provided
+                if course_key and course_key in ACCOUNT_POOL:
+                    ACCOUNT_POOL[course_key]["token"] = sess["token"]
+                    ACCOUNT_POOL[course_key]["userId"] = sess["user_id"]
+
+                # If primary account, update ACTIVE_SESSION and session.json
+                if email == DISHA_EMAIL:
+                    ACTIVE_SESSION = sess
+                    os.environ["DISHA_TOKEN"] = sess["token"]
+                    os.environ["DISHA_USER_ID"] = sess["user_id"]
+                    try:
+                        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+                            json.dump(sess, f, indent=2, ensure_ascii=False)
+                    except Exception:
+                        pass
+                print(f"[+] Login successful for {email} (User {sess['user_id']})!")
                 return sess
     except Exception as e:
-        print(f"[!] Auto-login error: {e}")
+        print(f"[!] Auto-login error for {email}: {e}")
     return None
 
 def load_account_pool():
@@ -152,7 +165,13 @@ def get_candidate_owners_for_course(course_id: str) -> list:
                 continue
             seen_users.add(uid)
             blocked_until = RATE_LIMITED_USERS.get(uid, 0)
-            candidate = {"userId": uid, "token": str(cred["token"]), "ownerKey": k}
+            candidate = {
+                "userId": uid,
+                "token": str(cred["token"]),
+                "email": cred.get("email"),
+                "password": cred.get("password"),
+                "ownerKey": k
+            }
             if blocked_until > now:
                 cooldown.append(candidate)
             else:
@@ -162,7 +181,13 @@ def get_candidate_owners_for_course(course_id: str) -> list:
     def_cred = pool.get("default")
     if def_cred and def_cred.get("userId") and str(def_cred["userId"]) not in seen_users:
         uid = str(def_cred["userId"])
-        candidate = {"userId": uid, "token": str(def_cred["token"]), "ownerKey": "default"}
+        candidate = {
+            "userId": uid,
+            "token": str(def_cred["token"]),
+            "email": def_cred.get("email"),
+            "password": def_cred.get("password"),
+            "ownerKey": "default"
+        }
         if RATE_LIMITED_USERS.get(uid, 0) > now:
             cooldown.append(candidate)
         else:
