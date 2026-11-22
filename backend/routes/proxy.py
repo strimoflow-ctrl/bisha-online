@@ -1,9 +1,26 @@
 import re
+import json
+import base64
 import requests
+from urllib.parse import urlparse, urljoin, quote, unquote
 from flask import Blueprint, Response, request, jsonify
 from crypto_utils import decrypt_xor28_pdf, is_allowed_media_url
+from .shim_data import SHIM_TEMPLATE
 
 proxy_bp = Blueprint("proxy", __name__)
+
+BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+APPX_PLAY_ORIGIN = "https://appx-play.classx.co.in"
+
+def build_native_appx_player_shim(base_url: str, pathname_and_query: str) -> str:
+    """
+    Client-side shim injected into the Appx player HTML.
+    Intercepts window.fetch and XMLHttpRequest to redirect classx.co.in media requests
+    through our backend /api/mp/* proxy, eliminating CORS & missing Referer blocks.
+    """
+    safe_base = base_url.replace('"', '&quot;')
+    safe_path = json.dumps(pathname_and_query)
+    return SHIM_TEMPLATE.replace("__SAFE_BASE_SLOT__", safe_base).replace("__SAFE_PATH_SLOT__", safe_path)
 
 @proxy_bp.route("/uhs-hls-player/<path:subpath>", methods=["GET", "OPTIONS"])
 def proxy_uhs_player(subpath):
@@ -19,7 +36,7 @@ def proxy_uhs_player(subpath):
     if request.query_string:
         target += f"?{request.query_string.decode('utf-8', errors='ignore')}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": BROWSER_UA,
         "Referer": "https://player.appx.co.in/"
     }
     try:
@@ -57,7 +74,7 @@ def proxy_next_static(subpath):
     if request.query_string:
         target += f"?{request.query_string.decode('utf-8', errors='ignore')}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": BROWSER_UA,
         "Referer": "https://player.appx.co.in/"
     }
     try:
@@ -79,23 +96,41 @@ def proxy_next_static(subpath):
 
 @proxy_bp.route("/api/disha-player", methods=["GET"])
 def api_disha_player():
-    """Proxies Appx protected web player for DRM/encrypted recorded lecture streams"""
+    """Proxies Appx protected web player and injects native CORS shim and media proxy hooks"""
     target_url = request.args.get("url")
     if not target_url:
         return "Missing URL", 400
-    
+
+    parsed = urlparse(target_url)
+    clean_target = target_url.replace("&debug=true", "").replace("?debug=true&", "?").replace("?debug=true", "")
+    pathname_and_query = parsed.path + ("?" + parsed.query if parsed.query else "")
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": "https://player.appx.co.in/"
+        "User-Agent": BROWSER_UA,
+        "Referer": "https://dishaonlineclasses.classx.co.in/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
-    
+
     try:
-        r = requests.get(target_url, headers=headers, timeout=15)
+        r = requests.get(clean_target, headers=headers, timeout=15)
         if r.status_code != 200:
             return f"Player Error {r.status_code}", r.status_code
-            
+
         html = r.text
-        resp = Response(html, status=200, mimetype="text/html")
+        # Strip crossorigin attributes from preload and inline scripts
+        html = re.sub(r'\s+crossorigin(?:=(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?', '', html, flags=re.IGNORECASE)
+        html = re.sub(r',\s*["\']crossOrigin["\']\s*:\s*["\']anonymous["\']', '', html)
+
+        # Inject native shim and watermark style
+        shim = build_native_appx_player_shim(clean_target, pathname_and_query)
+        watermark_style = '<style>#lovable-badge,[aria-label*="COMBINED_IMG_PLAYER"]{display:none!important}#watermark{opacity:0.01!important;font-size:1px!important;pointer-events:none!important}</style>'
+
+        if '<head>' in html:
+            html = html.replace('<head>', f'<head>{shim}{watermark_style}')
+        else:
+            html = f"{shim}{watermark_style}{html}"
+
+        resp = Response(html, status=200, mimetype="text/html; charset=utf-8")
         resp.headers["Access-Control-Allow-Origin"] = "*"
         resp.headers["X-Frame-Options"] = "ALLOWALL"
         resp.headers["Content-Security-Policy"] = "frame-ancestors *"
@@ -103,28 +138,136 @@ def api_disha_player():
     except Exception as e:
         return f"Error loading player: {e}", 500
 
+@proxy_bp.route("/api/mp/<path:subpath>", methods=["GET", "POST", "OPTIONS"])
+def proxy_media_segment(subpath):
+    """
+    Reverse proxy for Appx video manifests (.m3u8), keys, and media segments (.ts/.m4s).
+    Ensures player fetches pass without CORS or Referer rejection from ClassX CDNs.
+    """
+    if request.method == "OPTIONS":
+        resp = Response(status=200)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        return resp
+
+    parts = subpath.split('/')
+    b64_part = parts[0] if parts else ''
+    if not b64_part:
+        return "Missing segment token", 400
+
+    try:
+        # Restore URL-safe base64 padding
+        padded_b64 = b64_part.replace('-', '+').replace('_', '/')
+        padded_b64 += '=' * (-len(padded_b64) % 4)
+        decoded_url = base64.b64decode(padded_b64).decode('utf-8').strip()
+    except Exception as e:
+        return f"Invalid segment token: {e}", 400
+
+    if not is_allowed_media_url(decoded_url):
+        return "Forbidden media host", 403
+
+    # If relative subpath resolved against decodedUrl
+    if len(parts) >= 2:
+        try:
+            rel_subpath = '/'.join(parts[1:])
+            orig_filename = decoded_url.split('?')[0].split('/')[-1]
+            if len(parts) > 2 or (rel_subpath and rel_subpath != orig_filename and rel_subpath != 'f' and rel_subpath != 'seg'):
+                resolved = urljoin(decoded_url, rel_subpath)
+                if is_allowed_media_url(resolved):
+                    decoded_url = resolved
+        except Exception:
+            pass
+
+    is_classx_cdn = bool(re.search(r'transcoded-videos|liveclasses\.cloud-front\.in|pull-dq\.classx\.co\.in', decoded_url, re.IGNORECASE))
+    fetch_headers = {
+        "User-Agent": BROWSER_UA,
+        "Origin": "https://dishaonlineclasses.classx.co.in" if is_classx_cdn else APPX_PLAY_ORIGIN,
+        "Referer": "https://dishaonlineclasses.classx.co.in/" if is_classx_cdn else f"{APPX_PLAY_ORIGIN}/",
+        "Accept": request.headers.get("Accept", "*/*")
+    }
+    if request.headers.get("Range"):
+        fetch_headers["Range"] = request.headers.get("Range")
+
+    try:
+        up_res = requests.get(decoded_url, headers=fetch_headers, stream=True, timeout=20)
+        ct = up_res.headers.get("Content-Type", "")
+
+        # If it's an m3u8 playlist, rewrite child segments to also route through /api/mp/
+        if ".m3u8" in decoded_url.lower() or "mpegurl" in ct.lower():
+            m3u8_text = up_res.text
+            base_parsed = urlparse(decoded_url)
+
+            def encode_child_mp_url(raw_child):
+                raw_child = raw_child.strip()
+                if not raw_child or raw_child.startswith('#'):
+                    return raw_child
+                try:
+                    full_href = urljoin(decoded_url, raw_child)
+                    if not is_allowed_media_url(full_href):
+                        return raw_child
+                    b64_str = base64.b64encode(full_href.encode('utf-8')).decode('utf-8').replace('+', '-').replace('/', '_').rstrip('=')
+                    name = full_href.split('?')[0].split('/')[-1] or 'seg'
+                    return f"/api/mp/{b64_str}/{quote(name)}"
+                except Exception:
+                    return raw_child
+
+            rewritten_lines = []
+            for line in m3u8_text.splitlines():
+                t = line.strip()
+                if not t:
+                    rewritten_lines.append(line)
+                    continue
+                if t.startswith('#EXT-X-KEY'):
+                    def replace_key(m):
+                        orig_uri = m.group(1)
+                        new_uri = encode_child_mp_url(orig_uri)
+                        return f'URI="{new_uri}"'
+                    rewritten_lines.append(re.sub(r'URI="([^"]+)"', replace_key, t))
+                elif t.startswith('#'):
+                    rewritten_lines.append(t)
+                else:
+                    rewritten_lines.append(encode_child_mp_url(t))
+
+            resp = Response('\n'.join(rewritten_lines), status=up_res.status_code, mimetype="application/vnd.apple.mpegurl; charset=utf-8")
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+
+        # Direct media segment or key
+        def generate():
+            for chunk in up_res.iter_content(chunk_size=65536):
+                if chunk:
+                    yield chunk
+
+        resp = Response(generate(), status=up_res.status_code, content_type=ct or "application/octet-stream")
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        if up_res.headers.get("Content-Range"):
+            resp.headers["Content-Range"] = up_res.headers.get("Content-Range")
+        return resp
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @proxy_bp.route("/api/proxy-hls", methods=["GET"])
 def proxy_hls():
-    """Proxies HLS .m3u8 playlists and .tsc chunks with required Appx Referer headers"""
+    """Proxies direct HLS .m3u8 playlists and .tsc chunks with required Appx Referer headers"""
     target_url = request.args.get("url")
     if not target_url:
         return "Missing URL", 400
-    
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": BROWSER_UA,
         "Referer": "https://player.appx.co.in/"
     }
-    
+
     try:
         r = requests.get(target_url, headers=headers, stream=True, timeout=20)
         content_type = r.headers.get("Content-Type", "")
-        
-        # If it's an m3u8 playlist, rewrite keys and media segments to pass through proxy
+
         if ".m3u8" in target_url.lower() or "mpegurl" in content_type.lower():
             lines = r.text.splitlines()
             base_url = target_url.rsplit("/", 1)[0] + "/"
             rewritten_lines = []
-            
+
             for line in lines:
                 line_str = line.strip()
                 if not line_str:
@@ -143,7 +286,7 @@ def proxy_hls():
                     full_chunk = line_str if line_str.startswith("http") else base_url + line_str
                     proxy_chunk = f"/api/proxy-hls?url={requests.utils.quote(full_chunk)}"
                     rewritten_lines.append(proxy_chunk)
-            
+
             manifest = "\n".join(rewritten_lines)
             resp = Response(manifest, status=200, mimetype="application/vnd.apple.mpegurl")
             resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -203,7 +346,7 @@ def proxy_pdf():
             r.headers["Access-Control-Allow-Origin"] = "*"
             r.headers["Content-Disposition"] = "inline; filename=lecture_notes.pdf"
             return r
-        
+
         return """
         <!DOCTYPE html>
         <html>
