@@ -581,8 +581,11 @@ export default function App() {
     }
 
     let playVideo = { ...video };
-    // ONLY fetch if video has NO playable stream (no video_id, no hls_url, no embed_player_url)
-    if (!playVideo.video_id && !playVideo.hls_url && !playVideo.embed_player_url) {
+    // Fetch live stream token if not a direct YouTube ID (ytFlag === 1) and not a direct HLS m3u8
+    const isDirectYoutube = playVideo.ytFlag === 1 && playVideo.video_id && /^[A-Za-z0-9_-]{11}$/.test(playVideo.video_id);
+    const isDirectHls = Boolean(playVideo.hls_url || (playVideo.video_id && playVideo.video_id.includes('.m3u8')));
+    
+    if (!isDirectYoutube && !isDirectHls && !playVideo.embed_player_url) {
       try {
         const cId = selectedBatch?.id || video.course_id || '62';
         showToast('🔄 Connecting class stream...');

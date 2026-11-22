@@ -112,13 +112,15 @@ def _render_disha_player(target_url: str):
             return f"Player Error {r.status_code}", r.status_code
 
         html = r.text
+        # Strip existing base tags if any
+        html = re.sub(r'<base\s+[^>]*>', '', html, flags=re.IGNORECASE)
         # Strip crossorigin attributes from preload and inline scripts
         html = re.sub(r'\s+crossorigin(?:=(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?', '', html, flags=re.IGNORECASE)
         html = re.sub(r',\s*["\']crossOrigin["\']\s*:\s*["\']anonymous["\']', '', html)
 
         # Inject native shim and watermark style
         shim = build_native_appx_player_shim(clean_target, pathname_and_query)
-        watermark_style = '<style>#lovable-badge,[aria-label*="COMBINED_IMG_PLAYER"]{display:none!important}#watermark{opacity:0.01!important;font-size:1px!important;pointer-events:none!important}</style>'
+        watermark_style = '<style>#lovable-badge,[aria-label*="COMBINED_IMG_PLAYER"],nextjs-portal,div[data-nextjs-dialog-overlay],#next-route-announcer{display:none!important}#watermark{opacity:0.01!important;font-size:1px!important;pointer-events:none!important}</style>'
 
         if '<head>' in html:
             html = html.replace('<head>', f'<head>{shim}{watermark_style}')
