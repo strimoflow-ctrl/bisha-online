@@ -589,12 +589,12 @@ export default function App() {
         const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}`).then(r => r.json());
         if (res && res.status === 200) {
           let hls = res.hls_url || '';
-          if (hls && hls.startsWith('/api')) {
+          if (hls && hls.startsWith('/')) {
             const root = API_BASE_URL.replace(/\/api\/?$/, '');
             hls = `${root}${hls}`;
           }
           let embed = res.embed_player_url || '';
-          if (embed && embed.startsWith('/api')) {
+          if (embed && embed.startsWith('/')) {
             const root = API_BASE_URL.replace(/\/api\/?$/, '');
             embed = `${root}${embed}`;
           }
@@ -1043,158 +1043,195 @@ export default function App() {
                       <Folder className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
                       <p className="text-xs text-zinc-400">इस फोल्डर में कोई सामग्री उपलब्ध नहीं है</p>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {folderItems.map((item) => {
-                        // 1. FOLDER ITEM
-                        if (item.material_type === 'FOLDER') {
-                          return (
-                            <div 
-                              key={item.id}
-                              onClick={() => handleOpenFolder(item)}
-                              className="bg-[#0b0b0e] hover:bg-[#121217] border border-[#1c1c22] hover:border-zinc-700 rounded-xl p-3 flex items-center justify-between cursor-pointer active:scale-[0.99] transition-all"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                                  <Folder className="w-4 h-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <h4 className="text-xs font-bold text-white truncate">
-                                    {item.title}
-                                  </h4>
-                                  <div className="flex items-center gap-2 text-[10px] text-zinc-500 mt-0.5">
-                                    {parseInt(item.videos_count) > 0 && <span>{item.videos_count} वीडियो</span>}
-                                    {parseInt(item.videos_count) > 0 && parseInt(item.files_count) > 0 && <span>•</span>}
-                                    {parseInt(item.files_count) > 0 && <span>{item.files_count} नोट्स</span>}
-                                    {parseInt(item.videos_count) === 0 && parseInt(item.files_count) === 0 && <span>फोल्डर</span>}
-                                  </div>
-                                </div>
-                              </div>
-                              <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
-                            </div>
-                          );
-                        }
+                  ) : (() => {
+                    const foldersList = folderItems.filter(i => i.material_type === 'FOLDER');
+                    const videosList = folderItems.filter(i => i.material_type === 'VIDEO');
+                    const docsList = folderItems.filter(i => i.material_type === 'PDF' || i.material_type === 'FILE');
+                    const linksList = folderItems.filter(i => i.material_type === 'LINK');
 
-                        // 2. VIDEO ITEM
-                        if (item.material_type === 'VIDEO') {
-                          return (
-                            <div 
-                              key={item.id}
-                              onClick={() => handlePlayVideo(item)}
-                              className="bg-[#0b0b0e] hover:bg-[#121217] border border-[#1c1c22] hover:border-zinc-700 rounded-xl p-2.5 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition-all"
-                            >
-                              <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-zinc-900 shrink-0">
-                                <img 
-                                  src={item.thumbnail || "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png"} 
-                                  alt={item.title} 
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    e.target.src = "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png";
-                                  }}
-                                />
-                                {item.is_upcoming ? (
-                                  <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-[8px] font-black uppercase text-black">
-                                    Upcoming
-                                  </div>
-                                ) : (
-                                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                    <div className="w-6 h-6 rounded-full bg-white text-black flex items-center justify-center">
-                                      <Play className="w-3 h-3 fill-black ml-0.5" />
+                    return (
+                      <div className="space-y-4">
+                        {/* 1. Folders Section */}
+                        {foldersList.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 px-0.5">
+                              <Folder className="w-3.5 h-3.5 text-amber-400" />
+                              फोल्डर्स ({foldersList.length})
+                            </span>
+                            <div className="space-y-2">
+                              {foldersList.map((item) => (
+                                <div 
+                                  key={item.id}
+                                  onClick={() => handleOpenFolder(item)}
+                                  className="bg-[#0b0b0e] hover:bg-[#121217] border border-[#1c1c22] hover:border-zinc-700 rounded-xl p-3 flex items-center justify-between cursor-pointer active:scale-[0.99] transition-all shadow-sm"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                                      <Folder className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <h4 className="text-xs font-bold text-white truncate">
+                                        {item.title}
+                                      </h4>
+                                      <div className="flex items-center gap-2 text-[10px] text-zinc-500 mt-0.5">
+                                        {parseInt(item.videos_count) > 0 && <span>{item.videos_count} वीडियो</span>}
+                                        {parseInt(item.videos_count) > 0 && parseInt(item.files_count) > 0 && <span>•</span>}
+                                        {parseInt(item.files_count) > 0 && <span>{item.files_count} नोट्स</span>}
+                                        {parseInt(item.videos_count) === 0 && parseInt(item.files_count) === 0 && <span>फोल्डर</span>}
+                                      </div>
                                     </div>
                                   </div>
-                                )}
-                              </div>
-
-                              <div className="min-w-0 flex-1">
-                                <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
-                                  {item.title}
-                                </h4>
-                                <div className="text-[10px] text-zinc-500 mt-1.5 flex items-center gap-1.5">
-                                  <span>{item.date || (item.is_upcoming ? 'Upcoming Class' : 'Lecture')}</span>
-                                  {item.duration && <span>• {item.duration}</span>}
+                                  <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
                                 </div>
-                              </div>
+                              ))}
                             </div>
-                          );
-                        }
+                          </div>
+                        )}
 
-                        // 3. PDF / FILE ITEM
-                        if (item.material_type === 'PDF' || item.material_type === 'FILE') {
-                          return (
-                            <div 
-                              key={item.id}
-                              className="bg-[#0b0b0e] border border-[#1c1c22] rounded-xl p-3 flex items-center justify-between"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0">
-                                  <FileText className="w-4 h-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <h4 className="text-xs font-bold text-white truncate">
-                                    {item.title}
-                                  </h4>
-                                  <span className="text-[10px] text-zinc-500">
-                                    {item.has_file ? 'अध्ययन सामग्री (PDF)' : 'अपलोड प्रतीक्षारत (Pending Upload)'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {item.has_file ? (
-                                <a 
-                                  href={`${API_BASE_URL}/proxy-pdf?url=${encodeURIComponent(item.pdf_link)}`} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="p-2 rounded-lg bg-zinc-800 text-zinc-200 hover:text-white transition-colors shrink-0"
-                                  title="PDF डाउनलोड करें"
+                        {/* 2. Video Lectures Section */}
+                        {videosList.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 px-0.5 pt-1">
+                              <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
+                              क्लास लेक्चर्स ({videosList.length})
+                            </span>
+                            <div className="space-y-2">
+                              {videosList.map((item) => (
+                                <div 
+                                  key={item.id}
+                                  onClick={() => handlePlayVideo(item)}
+                                  className="bg-[#0b0b0e] hover:bg-[#121217] border border-[#1c1c22] hover:border-zinc-700 rounded-xl p-2.5 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition-all shadow-sm"
                                 >
-                                  <Download className="w-4 h-4" />
-                                </a>
-                              ) : (
-                                <span className="text-[10px] font-semibold text-zinc-600 px-2 py-1 bg-zinc-900 rounded-md">
-                                  शीघ्र
-                                </span>
-                              )}
+                                  <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-zinc-900 shrink-0">
+                                    <img 
+                                      src={item.thumbnail || "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png"} 
+                                      alt={item.title} 
+                                      className="w-full h-full object-cover"
+                                      onError={(e) => {
+                                        e.target.src = "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png";
+                                      }}
+                                    />
+                                    {item.is_upcoming ? (
+                                      <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-[8px] font-black uppercase text-black">
+                                        Upcoming
+                                      </div>
+                                    ) : (
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <div className="w-6 h-6 rounded-full bg-white text-black flex items-center justify-center">
+                                          <Play className="w-3 h-3 fill-black ml-0.5" />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
+                                      {item.title}
+                                    </h4>
+                                    <div className="text-[10px] text-zinc-500 mt-1.5 flex items-center gap-1.5">
+                                      <span>{item.date || (item.is_upcoming ? 'Upcoming Class' : 'Lecture')}</span>
+                                      {item.duration && <span>• {item.duration}</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                          );
-                        }
+                          </div>
+                        )}
 
-                        // 4. LINK ITEM
-                        if (item.material_type === 'LINK') {
-                          let finalLink = item.link_url || '';
-                          const tLow = (item.title || '').toLowerCase();
-                          if (tLow.includes('telegram') || finalLink.includes('t.me')) {
-                            finalLink = 'https://t.me/hrbseb10thallcorse';
-                          } else if (tLow.includes('whatsapp') || finalLink.includes('chat.whatsapp.com') || finalLink.includes('whatsapp.com')) {
-                            finalLink = 'https://whatsapp.com/channel/0029VbF7oDdLo4hdnj39Cw17';
-                          }
-                          return (
-                            <a 
-                              key={item.id}
-                              href={finalLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="bg-[#0b0b0e] hover:bg-[#121217] border border-[#1c1c22] rounded-xl p-3 flex items-center justify-between transition-colors block"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                                  <ExternalLink className="w-4 h-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <h4 className="text-xs font-bold text-white truncate">
-                                    {item.title}
-                                  </h4>
-                                  <span className="text-[10px] text-zinc-500">External Link</span>
-                                </div>
-                              </div>
-                              <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
-                            </a>
-                          );
-                        }
+                        {/* 3. Study Notes & PDFs Section */}
+                        {docsList.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1.5 px-0.5 pt-1">
+                              <FileText className="w-3.5 h-3.5 text-red-400" />
+                              स्टडी नोट्स एवं PDFs ({docsList.length})
+                            </span>
+                            <div className="space-y-2">
+                              {docsList.map((item) => (
+                                <div 
+                                  key={item.id}
+                                  className="bg-[#0b0b0e] border border-[#1c1c22] rounded-xl p-3 flex items-center justify-between"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-9 h-9 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+                                      <FileText className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <h4 className="text-xs font-bold text-white truncate">
+                                        {item.title}
+                                      </h4>
+                                      <span className="text-[10px] text-zinc-500">
+                                        {item.has_file ? 'अध्ययन सामग्री (PDF)' : 'अपलोड प्रतीक्षारत (Pending Upload)'}
+                                      </span>
+                                    </div>
+                                  </div>
 
-                        return null;
-                      })}
-                    </div>
-                  )}
+                                  {item.has_file ? (
+                                    <a 
+                                      href={`${API_BASE_URL}/proxy-pdf?url=${encodeURIComponent(item.pdf_link)}`} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="p-2 rounded-lg bg-zinc-800 text-zinc-200 hover:text-white transition-colors shrink-0"
+                                      title="PDF डाउनलोड करें"
+                                    >
+                                      <Download className="w-4 h-4" />
+                                    </a>
+                                  ) : (
+                                    <span className="text-[10px] font-semibold text-zinc-600 px-2 py-1 bg-zinc-900 rounded-md">
+                                      शीघ्र
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 4. External Links Section */}
+                        {linksList.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5 px-0.5 pt-1">
+                              <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
+                              उपयोगी लिंक्स ({linksList.length})
+                            </span>
+                            <div className="space-y-2">
+                              {linksList.map((item) => {
+                                let finalLink = item.link_url || '';
+                                const tLow = (item.title || '').toLowerCase();
+                                if (tLow.includes('telegram') || finalLink.includes('t.me')) {
+                                  finalLink = 'https://t.me/hrbseb10thallcorse';
+                                } else if (tLow.includes('whatsapp') || finalLink.includes('chat.whatsapp.com') || finalLink.includes('whatsapp.com')) {
+                                  finalLink = 'https://whatsapp.com/channel/0029VbF7oDdLo4hdnj39Cw17';
+                                }
+                                return (
+                                  <a 
+                                    key={item.id}
+                                    href={finalLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="bg-[#0b0b0e] hover:bg-[#121217] border border-[#1c1c22] rounded-xl p-3 flex items-center justify-between transition-colors block"
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                                        <ExternalLink className="w-4 h-4" />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <h4 className="text-xs font-bold text-white truncate">
+                                          {item.title}
+                                        </h4>
+                                        <span className="text-[10px] text-zinc-500">External Link</span>
+                                      </div>
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

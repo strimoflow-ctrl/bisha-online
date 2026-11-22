@@ -62,9 +62,8 @@ def api_batch_video(course_id, video_id):
                         if tok and tok != "1234":
                             base_p = str(data.get("video_player_url") or "")
                             if not base_p or "token=" not in base_p:
-                                base_p = "https://appx-play.classx.co.in/combined-img-player?isMobile=true&debug=true&token="
-                            full_target = f"{base_p}{tok}"
-                            embed_player_url = f"/api/disha-player?url={requests.utils.quote(full_target)}"
+                                base_p = "https://appx-play.classx.co.in/combined-img-player?isMobile=true&token="
+                            embed_player_url = f"/combined-img-player?isMobile=true&token={tok}"
 
                         # B. Check direct file_link or video_id
                         raw_link = data.get("file_link") or data.get("video_id") or ""

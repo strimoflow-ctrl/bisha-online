@@ -94,13 +94,8 @@ def proxy_next_static(subpath):
     except Exception as e:
         return f"Proxy error: {e}", 502
 
-@proxy_bp.route("/api/disha-player", methods=["GET"])
-def api_disha_player():
-    """Proxies Appx protected web player and injects native CORS shim and media proxy hooks"""
-    target_url = request.args.get("url")
-    if not target_url:
-        return "Missing URL", 400
-
+def _render_disha_player(target_url: str):
+    """Internal helper to fetch and inject shim into Appx web player"""
     parsed = urlparse(target_url)
     clean_target = target_url.replace("&debug=true", "").replace("?debug=true&", "?").replace("?debug=true", "")
     pathname_and_query = parsed.path + ("?" + parsed.query if parsed.query else "")
@@ -137,6 +132,23 @@ def api_disha_player():
         return resp
     except Exception as e:
         return f"Error loading player: {e}", 500
+
+@proxy_bp.route("/combined-img-player", methods=["GET"])
+def proxy_combined_img_player():
+    """Direct route for /combined-img-player so Next.js matches document path and avoids cross-origin redirects"""
+    query_str = request.query_string.decode("utf-8", errors="ignore")
+    full_target = "https://appx-play.classx.co.in/combined-img-player"
+    if query_str:
+        full_target += f"?{query_str}"
+    return _render_disha_player(full_target)
+
+@proxy_bp.route("/api/disha-player", methods=["GET"])
+def api_disha_player():
+    """Proxies Appx protected web player and injects native CORS shim and media proxy hooks"""
+    target_url = request.args.get("url")
+    if not target_url:
+        return "Missing URL", 400
+    return _render_disha_player(target_url)
 
 @proxy_bp.route("/api/mp/<path:subpath>", methods=["GET", "POST", "OPTIONS"])
 def proxy_media_segment(subpath):

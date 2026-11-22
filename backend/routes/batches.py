@@ -311,6 +311,18 @@ def api_batch_folders(course_id):
                 
             items.append(entry)
             
+        # Group items: FOLDERS first, then VIDEOS, then NOTES/PDFs, then others
+        def _item_sort_key(it):
+            m = it.get("material_type", "")
+            if m == "FOLDER":
+                return 0
+            elif m == "VIDEO":
+                return 1
+            elif m in ["PDF", "FILE"]:
+                return 2
+            return 3
+
+        items.sort(key=_item_sort_key)
         res = {"status": 200, "count": len(items), "items": items}
         save_cached_folder(effective_id, parent_id, res)
         return res
