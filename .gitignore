@@ -4,6 +4,10 @@ backend/.env
 *.env
 session.json
 backend/session.json
+backend/account_pool.json
+backend/data_cache/
+gbdoc_src/
+gbdoc_vault.json
 
 # Scratch & Old Archive Files
 login.py
