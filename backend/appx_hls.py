@@ -38,24 +38,39 @@ def decrypt_appx_payload(cipher_b64: str, key_bytes: bytes, iv_b64: str, mode_di
     decrypted = unpadder.update(padded_data) + unpadder.finalize()
     return decrypted.decode("utf-8", errors="ignore")
 
-def decode_appx_segment_text(text: str, ext: str) -> bytes:
+def lenient_b64decode(b64_data) -> bytes:
+    if isinstance(b64_data, str):
+        b64_bytes = b64_data.encode('ascii', errors='ignore')
+    else:
+        b64_bytes = bytes(b64_data)
+    clean = re.sub(rb'[^A-Za-z0-9+/]', b'', b64_bytes)
+    missing = len(clean) % 4
+    if missing:
+        clean += b'=' * (4 - missing)
+    try:
+        return base64.b64decode(clean)
+    except Exception:
+        return base64.b64decode(clean + b'===', validate=False)
+
+def decode_appx_segment_text(raw_input, ext: str) -> bytes:
     clean_ext = ext.lower()
+    raw_bytes = raw_input if isinstance(raw_input, (bytes, bytearray)) else raw_input.encode('latin-1', errors='ignore')
     if clean_ext == ".tsa":
-        b64_str = "".join(chr((ord(c) - 20) & 0xFF) for c in text)
-        return base64.b64decode(b64_str)
+        b64 = bytes(((b - 20) & 0xFF) for b in raw_bytes)
+        return lenient_b64decode(b64)
     if clean_ext == ".tsb":
-        b64_str = "".join(chr(((ord(c) >> 3) ^ 42) & 0xFF) for c in text)
-        return base64.b64decode(b64_str)
+        b64 = bytes((((b >> 3) ^ 42) & 0xFF) for b in raw_bytes)
+        return lenient_b64decode(b64)
     if clean_ext == ".tsc":
-        b64_str = "".join(chr((ord(c) - 10) & 0xFF) for c in text)
-        return base64.b64decode(b64_str)
+        b64 = bytes(((b - 10) & 0xFF) for b in raw_bytes)
+        return lenient_b64decode(b64)
     if clean_ext == ".tsd":
-        b64_str = "".join(chr((ord(c) >> 2) & 0xFF) for c in text)
-        return base64.b64decode(b64_str)
+        b64 = bytes(((b >> 2) & 0xFF) for b in raw_bytes)
+        return lenient_b64decode(b64)
     if clean_ext == ".tse":
-        b64_str = "".join(chr(((ord(c) ^ 42) >> 3) & 0xFF) for c in text)
-        return base64.b64decode(b64_str)
-    return base64.b64decode(text)
+        b64 = bytes((((b ^ 42) >> 3) & 0xFF) for b in raw_bytes)
+        return lenient_b64decode(b64)
+    return lenient_b64decode(raw_bytes)
 
 def decode_appx_segment_binary(input_bytes: bytes, ext: str) -> bytes:
     clean_ext = ext.lower()

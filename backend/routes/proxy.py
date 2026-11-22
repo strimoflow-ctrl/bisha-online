@@ -526,29 +526,37 @@ def api_disha_appx_seg(name=None):
     m_ext = re.search(r"(\.ts[a-z]?)(?:\?|$)", seg_url, re.IGNORECASE)
     ext = m_ext.group(1).lower() if m_ext else ".tsd"
 
+    is_classx_cdn = bool(re.search(r'transcoded-videos|liveclasses\.cloud-front\.in|pull-dq\.classx\.co\.in', seg_url, re.IGNORECASE))
     seg_headers = {
         "User-Agent": BROWSER_UA,
-        "Origin": APPX_PLAY_ORIGIN,
-        "Referer": f"{APPX_PLAY_ORIGIN}/"
+        "Origin": "https://dishaonlineclasses.classx.co.in" if is_classx_cdn else APPX_PLAY_ORIGIN,
+        "Referer": "https://dishaonlineclasses.classx.co.in/" if is_classx_cdn else f"{APPX_PLAY_ORIGIN}/"
     }
 
     try:
-        r = requests.get(seg_url, headers=seg_headers, timeout=20)
+        r = requests.get(seg_url, headers=seg_headers, timeout=25)
         if r.status_code != 200:
             return f"Upstream segment HTTP {r.status_code}", r.status_code
 
-        # Layer 1 & 2: Decode wrapper + AES-128-CBC decrypt
-        cipher = Cipher(algorithms.AES(active_key), modes.CBC(hls_iv), backend=default_backend())
-        decryptor = cipher.decryptor()
-
+        # Layer 1: Decode wrapper (.tse, .tsa, .tsd, .tsf, etc.)
         if ext == ".ts":
-            decrypted = decryptor.update(r.content) + decryptor.finalize()
+            enc_bytes = r.content
         elif ext in [".tsf", ".tsg", ".tsh", ".tsi", ".tsj"]:
             enc_bytes = decode_appx_segment_binary(r.content, ext)
-            decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
         else:
-            enc_bytes = decode_appx_segment_text(r.text, ext)
-            decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
+            enc_bytes = decode_appx_segment_text(r.content, ext)
+
+        # Layer 2: AES-128-CBC Decrypt
+        rem = len(enc_bytes) % 16
+        if rem != 0:
+            enc_bytes = enc_bytes[:len(enc_bytes) - rem]
+
+        if not enc_bytes:
+            return "Empty segment payload", 500
+
+        cipher = Cipher(algorithms.AES(active_key), modes.CBC(hls_iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
 
         # Layer 3: Unscramble Appx PES payload bitwise NOT and PTS XOR timestamps
         clean_ts = unscramble_appx_ts(decrypted, entry.get("uhs_version", 3.0))
@@ -558,4 +566,6 @@ def api_disha_appx_seg(name=None):
         resp.headers["Cache-Control"] = "public, max-age=3600"
         return resp
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return f"Segment decrypt error: {e}", 500
