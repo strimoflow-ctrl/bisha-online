@@ -65,6 +65,19 @@ def proxy_uhs_player(subpath):
     except Exception as e:
         return f"Proxy error: {e}", 502
 
+@proxy_bp.route("/no-poster.jpg", methods=["GET"])
+def proxy_no_poster():
+    """Proxies default poster image for Appx video player"""
+    target = "https://appx-play.classx.co.in/no-poster.jpg"
+    headers = {"User-Agent": BROWSER_UA, "Referer": "https://player.appx.co.in/"}
+    try:
+        r = requests.get(target, headers=headers, timeout=10)
+        resp = Response(r.content, status=r.status_code, mimetype="image/jpeg")
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        return resp
+    except Exception:
+        return "", 204
+
 @proxy_bp.route("/_next/<path:subpath>", methods=["GET", "OPTIONS"])
 def proxy_next_static(subpath):
     """Proxies Next.js chunks, CSS, and polyfills for the Appx embedded player"""
@@ -85,15 +98,23 @@ def proxy_next_static(subpath):
     try:
         r = requests.get(target, headers=headers, timeout=15)
         content_type = r.headers.get("Content-Type")
-        if not content_type:
-            if subpath.endswith(".js"):
-                content_type = "application/javascript"
-            elif subpath.endswith(".css"):
-                content_type = "text/css"
-            else:
-                content_type = "application/octet-stream"
+        body = r.content
 
-        resp = Response(r.content, status=r.status_code, mimetype=content_type)
+        if subpath.endswith(".js"):
+            content_type = "application/javascript"
+            try:
+                text = r.text
+                if "!n.has(e)" in text:
+                    text = text.replace("!n.has(e)", '(n.set(e,"watermark"),false)')
+                    body = text.encode("utf-8")
+            except Exception:
+                pass
+        elif subpath.endswith(".css"):
+            content_type = "text/css"
+        elif not content_type:
+            content_type = "application/octet-stream"
+
+        resp = Response(body, status=r.status_code, mimetype=content_type)
         resp.headers["Access-Control-Allow-Origin"] = "*"
         return resp
     except Exception as e:
