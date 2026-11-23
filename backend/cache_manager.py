@@ -103,6 +103,8 @@ def save_cached_batches(data, push_firebase=True):
         firebase_put("disha/batches", data)
 
 # ----------------- Folder Cache -----------------
+# 24-hour safe cache (86,400 seconds) so Disha account is never overloaded.
+# If teachers upload new content, the user/admin can tap the Refresh button anytime.
 def get_cached_folder(course_id: str, parent_id: str, force_refresh: bool = False):
     if force_refresh:
         return None
@@ -113,14 +115,14 @@ def get_cached_folder(course_id: str, parent_id: str, force_refresh: bool = Fals
         item = PERSISTENT_FOLDER_CACHE[key]
         if isinstance(item, dict):
             cached_at = item.get("_cached_at", 0)
-            # Fresh for 15 minutes (900 seconds)
-            if now - cached_at < 900:
+            # Fresh for 24 hours (86400 seconds) - ultra safe, 0 rate limit risk
+            if now - cached_at < 86400:
                 return item
     # 2. Firebase check
     fb_data = firebase_get(f"disha/folders/{key}")
     if fb_data and isinstance(fb_data, dict):
         cached_at = fb_data.get("_cached_at", 0)
-        if now - cached_at < 900:
+        if now - cached_at < 86400:
             PERSISTENT_FOLDER_CACHE[key] = fb_data
             return fb_data
     return None
