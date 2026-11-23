@@ -278,6 +278,13 @@ def api_batch_folders(course_id):
                     hls_stream = decrypted_video_id
                     decrypted_video_id = ""
                     yt_flag = 0
+                elif ("youtube.com" in decrypted_video_id or "youtu.be" in decrypted_video_id):
+                    m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", decrypted_video_id)
+                    if m:
+                        decrypted_video_id = m.group(1)
+                        yt_flag = 1
+                elif len(decrypted_video_id) == 11 and not decrypted_video_id.startswith("http"):
+                    yt_flag = 1
                 
                 clean_pdf = sanitize_pdf_link(it.get("pdf_link") or it.get("pdf_link2") or "")
                 live_status = int(it.get("live_status", 3))

@@ -39,17 +39,49 @@ def api_batch_video(course_id, video_id):
             r_status = make_disha_request(status_url, course_id=effective_id).json()
             for lv in r_status.get("data", {}).get("live", []):
                 if str(lv.get("id")) == str(video_id):
+                    # Check encrypted livestream_links
                     live_links = lv.get("livestream_links", [])
                     if live_links and isinstance(live_links, list):
-                        first_p = live_links[0].get("path") or ""
-                        if first_p:
-                            dec_p = decrypt_val(first_p)
-                            if ".m3u8" in dec_p.lower():
-                                hls_stream = dec_p
-                    if not hls_stream:
-                        dec_f = decrypt_val(lv.get("file_link") or lv.get("recording_hls") or "")
-                        if ".m3u8" in dec_f.lower():
+                        for ll in live_links:
+                            for key in ["path", "backup_url", "backup_url2"]:
+                                p = ll.get(key)
+                                if p:
+                                    dec_p = decrypt_val(p)
+                                    if ".m3u8" in dec_p.lower():
+                                        hls_stream = dec_p
+                                        break
+                                    elif ("youtube.com" in dec_p or "youtu.be" in dec_p) and not yt_id:
+                                        m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", dec_p)
+                                        if m:
+                                            yt_id = m.group(1)
+                                            yt_flag = 1
+                            if hls_stream or yt_id:
+                                break
+
+                    # Check file_link or recording_hls or video_id or embed_url
+                    for field in [lv.get("file_link"), lv.get("recording_hls"), lv.get("video_id"), lv.get("embed_url")]:
+                        if not field: continue
+                        dec_f = decrypt_val(field) if (":" in str(field) and not str(field).startswith("http")) else str(field).strip()
+                        if not dec_f: continue
+                        if ".m3u8" in dec_f.lower() and not hls_stream:
                             hls_stream = dec_f
+                        elif ("youtube.com" in dec_f or "youtu.be" in dec_f) and not yt_id:
+                            m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", dec_f)
+                            if m:
+                                yt_id = m.group(1)
+                                yt_flag = 1
+                        elif dec_f and not dec_f.startswith("http") and len(dec_f) == 11 and not yt_id:
+                            yt_id = dec_f
+                            yt_flag = 1
+
+                    # Check video_player_token
+                    tok = str(lv.get("video_player_token") or "").strip()
+                    if tok and tok != "1234" and not hls_stream and not yt_id:
+                        warmed = warm_and_extract_appx_token(tok)
+                        if warmed:
+                            hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                        else:
+                            embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
                     break
         except Exception as lv_err:
             debug_collected["live_check_err"] = str(lv_err)
@@ -125,6 +157,20 @@ def api_batch_video(course_id, video_id):
                             embed_player_url = e_u
             except Exception as fb_err:
                 debug_collected["gbdoc_fallback_err"] = str(fb_err)
+
+        # Step 4: Client-hinted video ID fallback
+        client_vid = request.args.get("vid", "").strip() or request.args.get("v", "").strip()
+        if not yt_id and not hls_stream and not embed_player_url and client_vid:
+            if ".m3u8" in client_vid.lower():
+                hls_stream = client_vid
+            elif ("youtube.com" in client_vid or "youtu.be" in client_vid):
+                m = re.search(r"(?:v=|\/|embed\/)([0-9A-Za-z_-]{11})", client_vid)
+                if m:
+                    yt_id = m.group(1)
+                    yt_flag = 1
+            elif len(client_vid) == 11 and not client_vid.startswith("http"):
+                yt_id = client_vid
+                yt_flag = 1
 
         final_hls = hls_stream
         if hls_stream and hls_stream.startswith("http") and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):

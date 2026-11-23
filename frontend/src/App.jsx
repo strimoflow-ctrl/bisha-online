@@ -603,15 +603,16 @@ export default function App() {
     }
 
     let playVideo = { ...video };
-    // Fetch live stream token if not a direct YouTube ID (ytFlag === 1) and not a direct HLS m3u8
-    const isDirectYoutube = playVideo.ytFlag === 1 && playVideo.video_id && /^[A-Za-z0-9_-]{11}$/.test(playVideo.video_id);
+    // A video is direct YouTube if it has an 11-char ID or ytFlag === 1
+    const isDirectYoutube = Boolean(playVideo.video_id && (/^[A-Za-z0-9_-]{11}$/.test(playVideo.video_id) || playVideo.ytFlag === 1));
     const isDirectHls = Boolean(playVideo.hls_url || (playVideo.video_id && playVideo.video_id.includes('.m3u8')));
     
     if (!isDirectYoutube && !isDirectHls && !playVideo.embed_player_url) {
       try {
         const cId = selectedBatch?.id || video.course_id || '62';
         showToast('🔄 Connecting class stream...');
-        const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}`).then(r => r.json());
+        const vParam = playVideo.video_id ? `?vid=${encodeURIComponent(playVideo.video_id)}` : '';
+        const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}${vParam}`).then(r => r.json());
         if (res && res.status === 200) {
           let hls = res.hls_url || '';
           if (hls && hls.startsWith('/')) {
@@ -1361,79 +1362,20 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="relative w-full h-full overflow-hidden bg-black flex items-center justify-center">
-                      {/* 100% Original 16:9 - No Zoom, No Cutoff */}
                       <iframe 
                         ref={iframeRef}
-                        src={`https://www.youtube.com/embed/${activeVideo.video_id}?autoplay=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1&fs=0&disablekb=1`}
+                        src={`https://www.youtube.com/embed/${activeVideo.video_id}?autoplay=1&playsinline=1&rel=0`}
                         title={activeVideo.title}
-                        className="w-full h-full border-0 absolute inset-0 pointer-events-none"
+                        className="w-full h-full border-0 pointer-events-auto"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                         allowFullScreen
-                      />
-
-                      {/* Pure AMOLED Black Cyber Decryption Shield */}
-                      {shieldState.active && (
-                        <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center transition-opacity duration-300 pointer-events-none select-none px-4">
-                          <div className="w-full max-w-[320px] p-4 sm:p-5 rounded-2xl bg-[#08080c]/95 border border-emerald-500/30 flex flex-col items-center gap-3.5 shadow-[0_0_50px_rgba(16,185,129,0.18)] backdrop-blur-xl">
-                            {/* Top Header with Pulsing Dot */}
-                            <div className="w-full flex items-center justify-between border-b border-emerald-950/80 pb-2.5">
-                              <div className="flex items-center gap-2">
-                                <span className="relative flex h-2.5 w-2.5">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                                </span>
-                                <span className="text-[11px] font-mono font-extrabold text-emerald-400 tracking-widest uppercase">
-                                  {shieldState.title}
-                                </span>
-                              </div>
-                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
-                                AES-256
-                              </span>
-                            </div>
-
-                            {/* Glowing Progress Bar */}
-                            <div className="w-full space-y-1">
-                              <div className="w-full bg-zinc-950 h-2 rounded-full overflow-hidden border border-emerald-950 p-0.5">
-                                <div 
-                                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 rounded-full transition-all duration-300 ease-out shadow-[0_0_12px_rgba(16,185,129,0.8)]"
-                                  style={{ width: `${shieldState.progress}%` }}
-                                />
-                              </div>
-                              <div className="flex justify-between items-center text-[9px] font-mono text-zinc-500 px-0.5">
-                                <span>TUNNEL: SECURE</span>
-                                <span>{shieldState.progress}%</span>
-                              </div>
-                            </div>
-
-                            {/* Telemetry Status Message */}
-                            <div className="w-full bg-black/60 border border-zinc-800/80 rounded-xl py-2 px-3 flex items-center justify-center gap-2">
-                              <span className="text-[10px] text-zinc-200 font-mono tracking-tight text-center leading-snug">
-                                {shieldState.text}
-                              </span>
-                            </div>
-
-                            {/* Mini Tech Spec Badges */}
-                            <div className="flex items-center gap-2 text-[9px] font-mono text-zinc-400">
-                              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">AUDIO: 320 KBPS</span>
-                              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">NODE: #04-DEL</span>
-                              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">1080P HD</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Touch & Click Blocker: prevents YouTube header clicks while allowing mobile browser system drag/swipe gestures */}
-                      <div 
-                        className="absolute inset-0 z-30 pointer-events-auto select-none"
-                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                        onContextMenu={(e) => e.preventDefault()}
                       />
                     </div>
                   )}
                 </div>
 
-                {/* Custom Controls (ONLY for YouTube - HLS and Appx embed use native controls) */}
-                {!isHls && !activeVideo.embed_player_url && (
+                {/* Custom Controls for HLS Video */}
+                {isHls && (
                   <>
                     {/* Timeline Progress Seekbar */}
                     <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-3 space-y-2 shadow">
