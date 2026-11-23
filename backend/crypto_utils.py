@@ -51,6 +51,8 @@ def extract_pdf_from_raw(raw):
         dec = decrypt_val(str(raw_link)) if (":" in str(raw_link) and not str(raw_link).startswith("http")) else str(raw_link).strip()
         if dec and (dec.startswith("http://") or dec.startswith("https://")):
             dec_low = dec.lower()
+            if "pdflink.com" in dec_low or "videolink.com" in dec_low or "whatsapp.com" in dec_low or "telegram" in dec_low or "t.me" in dec_low:
+                continue
             if not any(dec_low.endswith(x) for x in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".m3u8", ".mpd", ".mp4", ".ts"]) and "youtube.com" not in dec_low and "youtu.be" not in dec_low:
                 pdf_url = dec
                 is_enc = str(raw_enc_flag or "0") != "0"

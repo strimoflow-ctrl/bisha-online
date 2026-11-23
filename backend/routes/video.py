@@ -26,10 +26,10 @@ def api_batch_video(course_id, video_id):
         is_yt = cached.get("ytFlag") == 1 or (cached.get("video_id") and len(str(cached.get("video_id"))) == 11)
         if is_yt:
             return jsonify(cached)
-        # Check if stream token is within 3 hour TTL (10800s)
+        # Check if stream token is within 24 hour TTL (86400s)
         cached_at = cached.get("cached_at", 0)
         has_stream = bool(cached.get("hls_url") or cached.get("embed_player_url") or cached.get("video_id"))
-        if has_stream and (time.time() - cached_at < 10800):
+        if has_stream and (time.time() - cached_at < 86400):
             return jsonify(cached)
 
     def _resolve_video():
@@ -43,20 +43,19 @@ def api_batch_video(course_id, video_id):
         is_enc_pdf = False
         debug_collected = {}
 
-        # Build candidate courses to search for this video across sibling and subject-owner batches
+        # Build candidate courses: primary first, then mapped owner (max 2-3 to prevent rate-limits)
         candidate_cids = [clean_id]
         if effective_id != clean_id and effective_id not in candidate_cids:
             candidate_cids.append(effective_id)
         for c in COURSE_OWNERS_POOL_MAP.get(clean_id, []):
             if c not in candidate_cids:
                 candidate_cids.append(c)
-        for c in COURSE_OWNERS_POOL_MAP.get(effective_id, []):
-            if c not in candidate_cids:
-                candidate_cids.append(c)
-        # Key subject providers: 61 (Hindi/English), 62 (10th/Foundation), 57 (Science Hindi), 87 (Science Crash), 59 (Arts)
-        for provider_cid in ["61", "62", "57", "87", "59", "89", "58", "88"]:
-            if provider_cid not in candidate_cids:
-                candidate_cids.append(provider_cid)
+                break
+        if len(candidate_cids) < 3:
+            for c in COURSE_OWNERS_POOL_MAP.get(effective_id, []):
+                if c not in candidate_cids:
+                    candidate_cids.append(c)
+                    break
 
         # Step 1: Check if video is currently a live broadcast
         try:
@@ -140,20 +139,24 @@ def api_batch_video(course_id, video_id):
                             if p_url:
                                 pdf_url, pdf_key, is_enc_pdf = p_url, p_k, p_enc
 
-                            # A. Check Appx video_player_token
-                            tok = str(data.get("video_player_token") or "").strip()
-                            if tok and tok != "1234":
-                                warmed = warm_and_extract_appx_token(tok)
-                                if warmed:
-                                    hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
-                                    q_map = warmed.get("qualities_map", {})
-                                    for q_lbl in ["1080p", "720p", "480p", "360p", "Auto"]:
-                                        if q_lbl in q_map:
-                                            qualities.append({"quality": q_lbl, "url": f"/api/disha/appx-hls/{q_lbl}.m3u8?token={tok}&q={q_lbl}"})
-                                else:
-                                    embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
+                            # A. Check encrypted_links for direct CDN HLS m3u8 (Primary & most stable)
+                            enc_links = data.get("encrypted_links", [])
+                            if enc_links and isinstance(enc_links, list):
+                                for el in enc_links:
+                                    q_lbl = str(el.get("title") or el.get("quality") or "Video").strip()
+                                    first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
+                                    if first_path:
+                                        dec_stream = decrypt_val(first_path)
+                                        if ".m3u8" in dec_stream.lower():
+                                            if not hls_stream:
+                                                hls_stream = dec_stream
+                                            q_url = f"/api/proxy-hls?url={requests.utils.quote(dec_stream)}" if "classx.co.in" in dec_stream else dec_stream
+                                            if not any(q["url"] == q_url for q in qualities):
+                                                qualities.append({"quality": q_lbl, "url": q_url})
 
-                            # B. Check direct file_link or video_id
+                            # B. Check direct file_link or recording_hls or video_id
+                            if not hls_stream and data.get("recording_hls"):
+                                hls_stream = data.get("recording_hls")
                             raw_link = data.get("file_link") or data.get("video_id") or ""
                             if raw_link:
                                 dec = decrypt_val(raw_link)
@@ -169,24 +172,19 @@ def api_batch_video(course_id, video_id):
                                         yt_id = m.group(1)
                                         yt_flag = 1
 
-                            # C. Check encrypted_links for HLS m3u8 and quality variants
-                            enc_links = data.get("encrypted_links", [])
-                            if enc_links and isinstance(enc_links, list):
-                                for el in enc_links:
-                                    q_lbl = str(el.get("title") or el.get("quality") or "Video").strip()
-                                    first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
-                                    if first_path:
-                                        dec_stream = decrypt_val(first_path)
-                                        if ".m3u8" in dec_stream.lower():
-                                            if not hls_stream:
-                                                hls_stream = dec_stream
-                                            q_url = f"/api/proxy-hls?url={requests.utils.quote(dec_stream)}" if "classx.co.in" in dec_stream else dec_stream
-                                            if not any(q["url"] == q_url for q in qualities):
-                                                qualities.append({"quality": q_lbl, "url": q_url})
-
-                            # D. Check recording_hls
-                            if not hls_stream and data.get("recording_hls"):
-                                hls_stream = data.get("recording_hls")
+                            # C. Check Appx video_player_token (Fallback if no direct HLS link found)
+                            if not hls_stream and not yt_id:
+                                tok = str(data.get("video_player_token") or "").strip()
+                                if tok and tok != "1234":
+                                    warmed = warm_and_extract_appx_token(tok)
+                                    if warmed:
+                                        hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                                        q_map = warmed.get("qualities_map", {})
+                                        for q_lbl in ["1080p", "720p", "480p", "360p", "Auto"]:
+                                            if q_lbl in q_map:
+                                                qualities.append({"quality": q_lbl, "url": f"/api/disha/appx-hls/{q_lbl}.m3u8?token={tok}&q={q_lbl}"})
+                                    else:
+                                        embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
             except Exception as ex:
                 debug_collected["primary_err"] = str(ex)
 
@@ -253,11 +251,13 @@ def api_batch_video(course_id, video_id):
             "debug": debug_collected
         }
 
-        # Cache playable streams: YouTube is permanent, Appx streams valid for 3 hours
+        # Cache playable streams for 24 hours so repeat clicks & multiple students hit 0 Disha requests
         is_playable = bool(yt_id or final_hls or embed_player_url)
         if is_playable:
             res_payload["cached_at"] = time.time()
-            save_cached_video(effective_id, video_id, res_payload)
+            save_cached_video(clean_id, video_id, res_payload)
+            if effective_id != clean_id:
+                save_cached_video(effective_id, video_id, res_payload)
 
         return res_payload
 

@@ -59,7 +59,7 @@ export default function App() {
 
   // Helper: Route 100% of PDFs to Cloudflare Edge Worker for instant zero-load decryption
   const getPdfProxyUrl = (pdfUrl, pdfKey, isDownload = false) => {
-    if (!pdfUrl) return '#';
+    if (!pdfUrl || pdfUrl === '#' || pdfUrl.includes('pdflink.com')) return '#';
     const kParam = pdfKey ? `&k=${encodeURIComponent(pdfKey)}` : '';
     if (CLOUDFLARE_WORKER_URL) {
       return `${CLOUDFLARE_WORKER_URL}/?url=${encodeURIComponent(pdfUrl)}${kParam}`;
@@ -1542,7 +1542,7 @@ export default function App() {
                     </p>
                   </div>
 
-                  {activeVideo.has_notes && activeVideo.pdf_link && (
+                  {activeVideo.has_notes && activeVideo.pdf_link && !activeVideo.pdf_link.includes('pdflink.com') && (
                     <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-zinc-800/80">
                       <div className="flex items-center gap-2 text-xs text-zinc-300 font-medium truncate">
                         <FileText className="w-4 h-4 text-emerald-400 shrink-0" />

@@ -132,12 +132,17 @@ def load_account_pool():
         }
     return ACCOUNT_POOL
 
-def mark_user_rate_limited(user_id: str, cooldown_minutes: int = 45):
-    """Puts a user account in cooldown when it encounters 429 or daily 4002 quota limit"""
+def mark_user_rate_limited(user_id: str, cooldown_minutes: int = 3):
+    """Puts a user account in brief cooldown (3 mins) when it encounters 429 or quota limit"""
     if not user_id:
         return
     RATE_LIMITED_USERS[str(user_id)] = time.time() + (cooldown_minutes * 60)
     print(f"[!] Marked user {user_id} as rate-limited for {cooldown_minutes} minutes.")
+
+def clear_rate_limits():
+    """Clears all rate limit cooldowns"""
+    global RATE_LIMITED_USERS
+    RATE_LIMITED_USERS.clear()
 
 def get_candidate_owners_for_course(course_id: str) -> list:
     """Returns candidate (userId, token) pairs for a course, prioritizing non-rate-limited accounts"""
