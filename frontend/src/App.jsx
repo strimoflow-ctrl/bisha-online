@@ -699,7 +699,7 @@ export default function App() {
     }
 
     // 2. Resolve stream in background while user is ALREADY inside the player!
-    const cId = selectedBatch?.id || video.course_id || '62';
+    const cId = video.course_id || selectedBatch?.id || '62';
     const vParam = video.video_id ? `?vid=${encodeURIComponent(video.video_id)}` : '';
     fetch(`${API_BASE_URL}/batch/${cId}/video/${video.id}${vParam}`)
       .then(r => r.json())

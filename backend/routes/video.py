@@ -2,7 +2,10 @@ import re
 import time
 import requests
 from flask import Blueprint, jsonify, request
-from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT, CLOUDFLARE_WORKER_URL
+from config import (
+    BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT,
+    COURSE_OWNERS_POOL_MAP, CLOUDFLARE_WORKER_URL
+)
 from crypto_utils import decrypt_val, extract_pdf_from_raw
 from disha_client import make_disha_request
 from appx_hls import APPX_PLAY_ORIGIN, warm_and_extract_appx_token
@@ -18,7 +21,7 @@ def api_batch_video(course_id, video_id):
     effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId") or VERIFIED_COURSE_OWNER_REDIRECT.get(clean_id, clean_id)
 
     # 1. Check Video Cache first (Reusable for YouTube permanently, and Appx streams for 3 hours)
-    cached = get_cached_video(effective_id, video_id)
+    cached = get_cached_video(effective_id, video_id) or get_cached_video(clean_id, video_id)
     if cached and isinstance(cached, dict):
         is_yt = cached.get("ytFlag") == 1 or (cached.get("video_id") and len(str(cached.get("video_id"))) == 11)
         if is_yt:
@@ -40,13 +43,24 @@ def api_batch_video(course_id, video_id):
         is_enc_pdf = False
         debug_collected = {}
 
-        # Step 1: Check if video is currently a live broadcast (Check clean_id first, then effective_id)
+        # Build candidate courses to search for this video across sibling and subject-owner batches
         candidate_cids = [clean_id]
-        if effective_id != clean_id:
+        if effective_id != clean_id and effective_id not in candidate_cids:
             candidate_cids.append(effective_id)
+        for c in COURSE_OWNERS_POOL_MAP.get(clean_id, []):
+            if c not in candidate_cids:
+                candidate_cids.append(c)
+        for c in COURSE_OWNERS_POOL_MAP.get(effective_id, []):
+            if c not in candidate_cids:
+                candidate_cids.append(c)
+        # Key subject providers: 61 (Hindi/English), 62 (10th/Foundation), 57 (Science Hindi), 87 (Science Crash), 59 (Arts)
+        for provider_cid in ["61", "62", "57", "87", "59", "89", "58", "88"]:
+            if provider_cid not in candidate_cids:
+                candidate_cids.append(provider_cid)
 
+        # Step 1: Check if video is currently a live broadcast
         try:
-            for cid_try in candidate_cids:
+            for cid_try in candidate_cids[:3]:
                 if hls_stream or yt_id:
                     break
                 status_url = f"{BASE_URL}get/course_contents_by_live_status?course_id={cid_try}&start=-1&live_status=1,2"
@@ -179,7 +193,7 @@ def api_batch_video(course_id, video_id):
         # Step 3: Fallback via gbdoc API if local account was rate-limited or returned null
         if not embed_player_url and not hls_stream and not yt_id:
             try:
-                for cid_try in [clean_id, effective_id]:
+                for cid_try in candidate_cids[:4]:
                     if embed_player_url or hls_stream or yt_id:
                         break
                     fb_url = f"https://gbdoc.vercel.app/api/disha/video?batchId={cid_try}&lectureId={video_id}"
