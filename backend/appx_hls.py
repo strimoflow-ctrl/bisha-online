@@ -5,6 +5,7 @@ import base64
 import hashlib
 import requests
 from urllib.parse import urlparse, quote, unquote
+from cache_manager import get_cached_appx_token, save_cached_appx_token
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
@@ -178,9 +179,27 @@ def warm_and_extract_appx_token(player_token: str):
         return None
 
     now = time.time()
+    # 1. Check local in-memory vault
     existing = APPX_TOKEN_VAULT.get(clean_token)
     if existing and existing.get("expires_at", 0) > now:
         return existing
+
+    # 2. Check cross-worker persistent cache / Firebase
+    cached_entry = get_cached_appx_token(clean_token)
+    if cached_entry and cached_entry.get("expires_at", 0) > now:
+        # Reconstruct bytes for hls_key
+        try:
+            hls_key_raw = cached_entry.get("hls_key")
+            if isinstance(hls_key_raw, str):
+                cached_entry["hls_key"] = bytes.fromhex(hls_key_raw)
+            q_map = cached_entry.get("qualities_map", {})
+            for q_k, q_v in q_map.items():
+                if isinstance(q_v.get("hls_key"), str):
+                    q_v["hls_key"] = bytes.fromhex(q_v["hls_key"])
+            APPX_TOKEN_VAULT[clean_token] = cached_entry
+            return cached_entry
+        except Exception:
+            pass
 
     try:
         final_url = f"{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={quote(clean_token)}"
@@ -292,6 +311,27 @@ def warm_and_extract_appx_token(player_token: str):
             "expires_at": now + 7200
         }
         APPX_TOKEN_VAULT[clean_token] = entry
+
+        # Save serializable copy for other Gunicorn workers & Firebase
+        try:
+            ser_qualities = {}
+            for q_name, q_val in qualities_map.items():
+                ser_qualities[q_name] = {
+                    "hls_key": q_val["hls_key"].hex() if isinstance(q_val.get("hls_key"), (bytes, bytearray)) else str(q_val.get("hls_key")),
+                    "m3u8_text": q_val.get("m3u8_text", "")
+                }
+            ser_entry = {
+                "token": clean_token,
+                "hls_key": default_quality["hls_key"].hex() if isinstance(default_quality.get("hls_key"), (bytes, bytearray)) else str(default_quality.get("hls_key")),
+                "m3u8_text": default_quality["m3u8_text"],
+                "uhs_version": uhs_version,
+                "qualities_map": ser_qualities,
+                "expires_at": now + 7200
+            }
+            save_cached_appx_token(clean_token, ser_entry)
+        except Exception:
+            pass
+
         return entry
     except Exception as e:
         return None

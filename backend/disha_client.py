@@ -107,7 +107,7 @@ def make_disha_request(url, course_id=None, method="GET", data=None, timeout=12)
             txt = resp.text.lower() if resp.text else ""
             if resp.status_code == 429 or "too many requests" in txt or "try again after 1 hour" in txt:
                 print(f"[!] Rate limit detected for user {user_id} on {url}. Marking cooldown.")
-                mark_user_rate_limited(user_id, cooldown_minutes=45)
+                mark_user_rate_limited(user_id, cooldown_minutes=3)
                 continue
 
             if resp.status_code == 200:
@@ -116,7 +116,7 @@ def make_disha_request(url, course_id=None, method="GET", data=None, timeout=12)
                     # Check for Appx 4002 quota limit
                     if j.get("status") == 4002 or "limit reached" in txt:
                         print(f"[!] 4002 Limit reached for user {user_id}. Marking cooldown.")
-                        mark_user_rate_limited(user_id, cooldown_minutes=60)
+                        mark_user_rate_limited(user_id, cooldown_minutes=3)
                         continue
                 except Exception:
                     pass

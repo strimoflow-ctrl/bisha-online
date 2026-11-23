@@ -26,10 +26,14 @@ def api_batch_video(course_id, video_id):
         is_yt = cached.get("ytFlag") == 1 or (cached.get("video_id") and len(str(cached.get("video_id"))) == 11)
         if is_yt:
             return jsonify(cached)
-        # Check if stream token is within 24 hour TTL (86400s)
+        # Check stream validity: YouTube is permanent, direct CDN is 12h, and Appx/Akamai tokens are 108 min (6480s)
         cached_at = cached.get("cached_at", 0)
-        has_stream = bool(cached.get("hls_url") or cached.get("embed_player_url") or cached.get("video_id"))
-        if has_stream and (time.time() - cached_at < 86400):
+        hls_u = str(cached.get("hls_url") or "")
+        embed_u = str(cached.get("embed_player_url") or "")
+        is_token_stream = "appx-hls" in hls_u or "token=" in hls_u or "token=" in embed_u or "edge-cache-token" in hls_u
+        max_age = 6480 if is_token_stream else 43200
+        has_stream = bool(hls_u or embed_u or cached.get("video_id"))
+        if has_stream and (time.time() - cached_at < max_age):
             return jsonify(cached)
 
     def _resolve_video():
@@ -177,7 +181,15 @@ def api_batch_video(course_id, video_id):
                             # C. Check Appx video_player_token for DRM protected lectures
                             tok = str(data.get("video_player_token") or "").strip()
                             if tok and tok != "1234" and not yt_id:
-                                embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
+                                warmed = warm_and_extract_appx_token(tok)
+                                if warmed:
+                                    hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                                    q_map = warmed.get("qualities_map", {})
+                                    for q_lbl in ["1080p", "720p", "480p", "360p", "Auto"]:
+                                        if q_lbl in q_map:
+                                            qualities.append({"quality": q_lbl, "url": f"/api/disha/appx-hls/{q_lbl}.m3u8?token={tok}&q={q_lbl}"})
+                                else:
+                                    embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
             except Exception as ex:
                 debug_collected["primary_err"] = str(ex)
 

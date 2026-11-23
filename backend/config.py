@@ -36,6 +36,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 VIDEO_CACHE_FILE = os.path.join(CACHE_DIR, "video_cache.json")
 BATCH_CACHE_FILE = os.path.join(CACHE_DIR, "batch_cache.json")
 FOLDER_CACHE_FILE = os.path.join(CACHE_DIR, "folder_cache.json")
+APPX_VAULT_CACHE_FILE = os.path.join(CACHE_DIR, "appx_vault.json")
 
 # Course Owners Pool Map (Which accounts have purchased which batches)
 COURSE_OWNERS_POOL_MAP = {

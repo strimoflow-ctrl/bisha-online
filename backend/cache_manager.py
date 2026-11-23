@@ -4,7 +4,7 @@ import time
 import threading
 import requests
 from config import (
-    VIDEO_CACHE_FILE, BATCH_CACHE_FILE, FOLDER_CACHE_FILE,
+    VIDEO_CACHE_FILE, BATCH_CACHE_FILE, FOLDER_CACHE_FILE, APPX_VAULT_CACHE_FILE,
     FIREBASE_DATABASE_URL, FIREBASE_DATABASE_SECRET
 )
 
@@ -204,3 +204,60 @@ def execute_coalesced(request_key: str, fetch_fn):
         if result_box["error"]:
             raise result_box["error"]
         return result_box["data"]
+
+
+# ----------------- Appx Token Vault Persistence (Cross-Worker Sync) -----------------
+PERSISTENT_APPX_VAULT = {}
+if os.path.exists(APPX_VAULT_CACHE_FILE):
+    try:
+        with open(APPX_VAULT_CACHE_FILE, "r", encoding="utf-8") as f:
+            PERSISTENT_APPX_VAULT = json.load(f)
+    except Exception:
+        PERSISTENT_APPX_VAULT = {}
+
+def get_cached_appx_token(token: str):
+    """Retrieve warmed Appx stream token from memory, shared disk file, or Firebase"""
+    if not token:
+        return None
+    now = time.time()
+    # 1. Memory check
+    with _CACHE_LOCK:
+        entry = PERSISTENT_APPX_VAULT.get(token)
+    if entry and entry.get("expires_at", 0) > now:
+        return entry
+
+    # 2. Disk file check (in case another Gunicorn worker warmed it)
+    if os.path.exists(APPX_VAULT_CACHE_FILE):
+        try:
+            with open(APPX_VAULT_CACHE_FILE, "r", encoding="utf-8") as f:
+                disk_vault = json.load(f)
+                entry = disk_vault.get(token)
+                if entry and entry.get("expires_at", 0) > now:
+                    with _CACHE_LOCK:
+                        PERSISTENT_APPX_VAULT[token] = entry
+                    return entry
+        except Exception:
+            pass
+
+    # 3. Firebase check
+    fb_entry = firebase_get(f"disha/appx_vault/{token}")
+    if fb_entry and isinstance(fb_entry, dict) and fb_entry.get("expires_at", 0) > now:
+        with _CACHE_LOCK:
+            PERSISTENT_APPX_VAULT[token] = fb_entry
+        return fb_entry
+
+    return None
+
+def save_cached_appx_token(token: str, entry: dict):
+    """Save warmed Appx stream token across all Gunicorn workers and Firebase"""
+    if not token or not isinstance(entry, dict):
+        return
+    with _CACHE_LOCK:
+        PERSISTENT_APPX_VAULT[token] = entry
+        try:
+            with open(APPX_VAULT_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(PERSISTENT_APPX_VAULT, f, ensure_ascii=False)
+        except Exception:
+            pass
+    firebase_put(f"disha/appx_vault/{token}", entry)
+

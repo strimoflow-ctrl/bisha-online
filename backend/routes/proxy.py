@@ -500,7 +500,8 @@ def api_disha_appx_hls(name=None):
     }
 
     # Extract active_key as 32-char hex string and uhs_version
-    key_hex = active_variant["hls_key"].hex()
+    raw_key = active_variant["hls_key"]
+    key_hex = raw_key.hex() if isinstance(raw_key, (bytes, bytearray)) else str(raw_key)
     uhs_version = float(entry.get("uhs_version", 3.0) or 3.0)
 
     lines = active_variant["m3u8_text"].splitlines()
