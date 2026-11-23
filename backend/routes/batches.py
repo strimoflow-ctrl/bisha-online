@@ -242,9 +242,11 @@ def api_batch_folders(course_id):
     if clean_id in SIBLING_COURSE_MAP and parent_id == "-1":
         parent_id = SIBLING_COURSE_MAP[clean_id].get("recordedFolderId", "-1")
 
-    # 1. Check Cache / Firebase
-    cached = get_cached_folder(effective_id, parent_id)
-    if cached:
+    force_refresh = request.args.get("refresh") == "1"
+
+    # 1. Check Cache / Firebase (with 15-min TTL or force_refresh)
+    cached = get_cached_folder(effective_id, parent_id, force_refresh=force_refresh)
+    if cached and not force_refresh:
         return jsonify(cached)
 
     def _fetch_folder():

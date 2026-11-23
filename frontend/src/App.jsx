@@ -56,6 +56,17 @@ export default function App() {
 
   // In-memory cache ref so we never refetch already-loaded data!
   const cacheRef = useRef({});
+
+  // Helper: Route 100% of PDFs to Cloudflare Edge Worker for instant zero-load decryption
+  const getPdfProxyUrl = (pdfUrl, pdfKey, isDownload = false) => {
+    if (!pdfUrl) return '#';
+    const kParam = pdfKey ? `&k=${encodeURIComponent(pdfKey)}` : '';
+    if (CLOUDFLARE_WORKER_URL) {
+      return `${CLOUDFLARE_WORKER_URL}/?url=${encodeURIComponent(pdfUrl)}${kParam}`;
+    }
+    const dParam = isDownload ? '&download=1' : '';
+    return `${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(pdfUrl)}${kParam}${dParam}`;
+  };
   const videoRef = useRef(null);
   const iframeRef = useRef(null);
   const hlsRef = useRef(null);
@@ -577,19 +588,23 @@ export default function App() {
     loadFolderContent(batch.id, '-1');
   };
 
-  // 3. Load Folder Content with Instant Cache
-  const loadFolderContent = async (courseId, folderId) => {
+  // 3. Load Folder Content with Instant Cache & Refresh capability
+  const loadFolderContent = async (courseId, folderId, forceRefresh = false) => {
     const folderCacheKey = `folder_${courseId}_${folderId}`;
-    if (cacheRef.current[folderCacheKey]) {
+    if (!forceRefresh && cacheRef.current[folderCacheKey]) {
       setFolderItems(cacheRef.current[folderCacheKey]);
       setLoadingFolder(false);
       return;
     }
 
     setLoadingFolder(true);
+    if (forceRefresh) {
+      delete cacheRef.current[folderCacheKey];
+    }
     setFolderItems([]);
     try {
-      const res = await fetch(`${API_BASE_URL}/batch/${courseId}/folders?parent_id=${folderId}`).then(r => r.json());
+      const q = forceRefresh ? '&refresh=1' : '';
+      const res = await fetch(`${API_BASE_URL}/batch/${courseId}/folders?parent_id=${folderId}${q}`).then(r => r.json());
       if (res && res.status === 200) {
         const items = res.items || [];
         cacheRef.current[folderCacheKey] = items;
@@ -651,26 +666,45 @@ export default function App() {
     }
   };
 
-  // Open Video in Dedicated Player Page
-  const handlePlayVideo = async (video) => {
+  // Open Video in Dedicated Player Page (Instantaneous Navigation)
+  const handlePlayVideo = (video) => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     if (video.is_upcoming || video.live_status === 2) {
       showToast(`⏰ This live class will start on ${video.date || 'scheduled time'}.`);
       return;
     }
 
-    let playVideo = { ...video };
     // A video is direct YouTube if it has an 11-char ID or ytFlag === 1
-    const isDirectYoutube = Boolean(playVideo.video_id && (/^[A-Za-z0-9_-]{11}$/.test(playVideo.video_id) || playVideo.ytFlag === 1));
-    const isDirectHls = Boolean(playVideo.hls_url || (playVideo.video_id && playVideo.video_id.includes('.m3u8')));
-    
-    if (!isDirectYoutube && !isDirectHls && !playVideo.embed_player_url) {
-      try {
-        const cId = selectedBatch?.id || video.course_id || '62';
-        showToast('🔄 Connecting class stream...');
-        const vParam = playVideo.video_id ? `?vid=${encodeURIComponent(playVideo.video_id)}` : '';
-        const res = await fetch(`${API_BASE_URL}/batch/${cId}/video/${playVideo.id}${vParam}`).then(r => r.json());
-        if (res && res.status === 200) {
+    const isDirectYoutube = Boolean(video.video_id && (/^[A-Za-z0-9_-]{11}$/.test(video.video_id) || video.ytFlag === 1));
+    const isDirectHls = Boolean(video.hls_url || (video.video_id && video.video_id.includes('.m3u8')));
+    const isAlreadyPlayable = Boolean(isDirectYoutube || isDirectHls || video.embed_player_url);
+
+    // 1. INSTANTLY transition to player view (< 10ms - zero waiting on list!)
+    const initialVideo = {
+      ...video,
+      isResolving: !isAlreadyPlayable,
+      resolveError: false
+    };
+
+    setSelectedQuality('Auto');
+    setShowQualityMenu(false);
+    setShowSpeedMenu(false);
+    setActiveVideo(initialVideo);
+    setView('player');
+    pushHistory({ view: 'player', videoId: video.id, courseId: selectedBatch?.id, selectedBatch, folderStack });
+
+    // If already playable, nothing more needed!
+    if (isAlreadyPlayable) {
+      return;
+    }
+
+    // 2. Resolve stream in background while user is ALREADY inside the player!
+    const cId = selectedBatch?.id || video.course_id || '62';
+    const vParam = video.video_id ? `?vid=${encodeURIComponent(video.video_id)}` : '';
+    fetch(`${API_BASE_URL}/batch/${cId}/video/${video.id}${vParam}`)
+      .then(r => r.json())
+      .then(res => {
+        if (res && res.status === 200 && (res.video_id || res.hls_url || res.embed_player_url)) {
           let hls = res.hls_url || '';
           if (hls && hls.startsWith('/')) {
             const root = API_BASE_URL.replace(/\/api\/?$/, '');
@@ -681,40 +715,30 @@ export default function App() {
             const root = API_BASE_URL.replace(/\/api\/?$/, '');
             embed = `${root}${embed}`;
           }
-          playVideo.video_id = res.video_id || playVideo.video_id || '';
-          playVideo.hls_url = hls || playVideo.hls_url || '';
-          playVideo.embed_player_url = embed || playVideo.embed_player_url || '';
-          playVideo.ytFlag = res.ytFlag ?? playVideo.ytFlag ?? 0;
-          playVideo.player_type = res.player_type || '';
-          playVideo.qualities = res.qualities || [];
-          if (res.pdf_link) {
-            playVideo.pdf_link = res.pdf_link;
-            playVideo.pdf_key = res.pdf_key;
-            playVideo.is_pdf_encrypted = res.is_pdf_encrypted;
-            playVideo.has_notes = true;
-          }
+          setActiveVideo(prev => ({
+            ...prev,
+            ...res,
+            video_id: res.video_id || prev?.video_id || '',
+            hls_url: hls || prev?.hls_url || '',
+            embed_player_url: embed || prev?.embed_player_url || '',
+            ytFlag: res.ytFlag ?? prev?.ytFlag ?? 0,
+            player_type: res.player_type || '',
+            qualities: res.qualities || [],
+            pdf_link: res.pdf_link || prev?.pdf_link || '',
+            pdf_key: res.pdf_key || prev?.pdf_key || '',
+            is_pdf_encrypted: res.is_pdf_encrypted ?? prev?.is_pdf_encrypted ?? false,
+            has_notes: Boolean(res.pdf_link || prev?.pdf_link),
+            isResolving: false,
+            resolveError: false
+          }));
+        } else {
+          setActiveVideo(prev => ({ ...prev, isResolving: false, resolveError: true }));
         }
-      } catch (e) {
-        console.error('Failed to resolve video stream:', e);
-      }
-    }
-
-    const isPlayable = Boolean(
-      playVideo.video_id || 
-      playVideo.hls_url || 
-      playVideo.embed_player_url ||
-      (typeof playVideo.video_id === 'string' && playVideo.video_id.includes('.m3u8'))
-    );
-    if (!isPlayable) {
-      showToast(`⚠️ Class stream is currently unavailable.`);
-      return;
-    }
-    setSelectedQuality('Auto');
-    setShowQualityMenu(false);
-    setShowSpeedMenu(false);
-    setActiveVideo(playVideo);
-    setView('player');
-    pushHistory({ view: 'player', videoId: playVideo.id, courseId: selectedBatch?.id, selectedBatch, folderStack });
+      })
+      .catch(err => {
+        console.error('Failed to resolve stream in background:', err);
+        setActiveVideo(prev => ({ ...prev, isResolving: false, resolveError: true }));
+      });
   };
 
   const activeVideoId = activeVideo?.id;
@@ -863,6 +887,22 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {view === 'batch' && (
+            <button
+              onClick={() => {
+                if (selectedBatch) {
+                  showToast('🔄 Refreshing classes & notes...');
+                  const curFolder = folderStack[folderStack.length - 1];
+                  loadFolderContent(selectedBatch.id, curFolder ? curFolder.id : '-1', true);
+                }
+              }}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-[#1f1f26] transition-colors shrink-0 active:scale-95 cursor-pointer"
+              title="नवीनतम कक्षाएं रीफ्रेश करें (Refresh Latest Content)"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
+          )}
         </header>
 
         {/* Toast Notification Banner */}
@@ -1332,7 +1372,7 @@ export default function App() {
 
                                   {item.has_file ? (
                                     <a 
-                                      href={`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(item.pdf_link)}${item.pdf_key ? `&k=${encodeURIComponent(item.pdf_key)}` : ''}`} 
+                                      href={getPdfProxyUrl(item.pdf_link, item.pdf_key, false)}
                                       target="_blank" 
                                       rel="noopener noreferrer"
                                       className="p-2 rounded-lg bg-zinc-800 text-zinc-200 hover:text-white transition-colors shrink-0"
@@ -1438,7 +1478,26 @@ export default function App() {
                   ref={playerContainerRef}
                   className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-[#1e1e24] shadow-2xl flex items-center justify-center"
                 >
-                  {isHls ? (
+                  {activeVideo.isResolving ? (
+                    <div className="relative w-full h-full flex flex-col items-center justify-center bg-black/95 p-4 text-center">
+                      <div className="w-9 h-9 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mb-3"></div>
+                      <span className="text-xs font-bold text-white tracking-wide">Connecting Secure Stream...</span>
+                      <span className="text-[10px] text-zinc-400 mt-1 font-mono">Decrypting video channel • Please wait</span>
+                    </div>
+                  ) : activeVideo.resolveError ? (
+                    <div className="relative w-full h-full flex flex-col items-center justify-center bg-black p-4 text-center space-y-2">
+                      <span className="text-sm font-bold text-amber-400">⚠️ Stream Currently Unavailable</span>
+                      <p className="text-xs text-zinc-400 max-w-xs leading-relaxed">
+                        Class stream details could not be retrieved from the server right now.
+                      </p>
+                      <button 
+                        onClick={() => handlePlayVideo(activeVideo)}
+                        className="mt-2 px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                      >
+                        Retry Stream
+                      </button>
+                    </div>
+                  ) : isHls ? (
                     <CustomVideoPlayer 
                       src={activeVideo.hls_url || activeVideo.video_id}
                       qualities={activeVideo.qualities || []}
@@ -1491,7 +1550,7 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <a 
-                          href={`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(activeVideo.pdf_link)}${activeVideo.pdf_key ? `&k=${encodeURIComponent(activeVideo.pdf_key)}` : ''}`}
+                          href={getPdfProxyUrl(activeVideo.pdf_link, activeVideo.pdf_key, false)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95 shadow cursor-pointer"
@@ -1500,7 +1559,7 @@ export default function App() {
                           <span>Open</span>
                         </a>
                         <a 
-                          href={`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(activeVideo.pdf_link)}${activeVideo.pdf_key ? `&k=${encodeURIComponent(activeVideo.pdf_key)}` : ''}&download=1`}
+                          href={getPdfProxyUrl(activeVideo.pdf_link, activeVideo.pdf_key, true)}
                           download="notes.pdf"
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-all active:scale-95 shadow cursor-pointer"
                         >

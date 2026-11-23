@@ -103,21 +103,32 @@ def save_cached_batches(data, push_firebase=True):
         firebase_put("disha/batches", data)
 
 # ----------------- Folder Cache -----------------
-def get_cached_folder(course_id: str, parent_id: str):
+def get_cached_folder(course_id: str, parent_id: str, force_refresh: bool = False):
+    if force_refresh:
+        return None
     key = f"{course_id}_{parent_id}"
+    now = time.time()
     # 1. Memory / local disk
     if key in PERSISTENT_FOLDER_CACHE:
-        return PERSISTENT_FOLDER_CACHE[key]
+        item = PERSISTENT_FOLDER_CACHE[key]
+        if isinstance(item, dict):
+            cached_at = item.get("_cached_at", 0)
+            # Fresh for 15 minutes (900 seconds)
+            if now - cached_at < 900:
+                return item
     # 2. Firebase check
     fb_data = firebase_get(f"disha/folders/{key}")
-    if fb_data:
-        PERSISTENT_FOLDER_CACHE[key] = fb_data
-        save_cached_folder(course_id, parent_id, fb_data, push_firebase=False)
-        return fb_data
+    if fb_data and isinstance(fb_data, dict):
+        cached_at = fb_data.get("_cached_at", 0)
+        if now - cached_at < 900:
+            PERSISTENT_FOLDER_CACHE[key] = fb_data
+            return fb_data
     return None
 
 def save_cached_folder(course_id: str, parent_id: str, data, push_firebase=True):
     key = f"{course_id}_{parent_id}"
+    if isinstance(data, dict):
+        data["_cached_at"] = time.time()
     with _CACHE_LOCK:
         PERSISTENT_FOLDER_CACHE[key] = data
         try:
@@ -131,11 +142,23 @@ def save_cached_folder(course_id: str, parent_id: str, data, push_firebase=True)
 # ----------------- Video Details Cache -----------------
 def get_cached_video(course_id: str, video_id: str):
     key = f"{course_id}_{video_id}"
+    # 1. Memory / local disk
     with _CACHE_LOCK:
-        return PERSISTENT_VIDEO_CACHE.get(key)
+        item = PERSISTENT_VIDEO_CACHE.get(key)
+    if item:
+        return item
+    # 2. Firebase check
+    fb_data = firebase_get(f"disha/videos/{key}")
+    if fb_data and isinstance(fb_data, dict):
+        with _CACHE_LOCK:
+            PERSISTENT_VIDEO_CACHE[key] = fb_data
+        return fb_data
+    return None
 
 def save_cached_video(course_id: str, video_id: str, data):
     key = f"{course_id}_{video_id}"
+    if isinstance(data, dict):
+        data["cached_at"] = time.time()
     with _CACHE_LOCK:
         PERSISTENT_VIDEO_CACHE[key] = data
         try:
@@ -143,6 +166,7 @@ def save_cached_video(course_id: str, video_id: str, data):
                 json.dump(PERSISTENT_VIDEO_CACHE, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+    firebase_put(f"disha/videos/{key}", data)
 
 # ----------------- Request Coalescing (Deduplication) -----------------
 def execute_coalesced(request_key: str, fetch_fn):

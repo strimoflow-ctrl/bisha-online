@@ -1,4 +1,5 @@
 import re
+import time
 import requests
 from flask import Blueprint, jsonify, request
 from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT, CLOUDFLARE_WORKER_URL
@@ -16,15 +17,17 @@ def api_batch_video(course_id, video_id):
     clean_id = str(course_id).split("_")[-1] if "_" in str(course_id) else str(course_id)
     effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId") or VERIFIED_COURSE_OWNER_REDIRECT.get(clean_id, clean_id)
 
-    # 1. Check Video Cache first (Reusable for YouTube and unexpiring HLS streams ONLY)
+    # 1. Check Video Cache first (Reusable for YouTube permanently, and Appx streams for 3 hours)
     cached = get_cached_video(effective_id, video_id)
-    if cached:
-        is_yt = cached.get("ytFlag") == 1 or cached.get("video_id")
-        hls = cached.get("hls_url") or ""
-        is_token_hls = "appx-hls" in hls or "token=" in hls
-        if is_yt or (hls and not is_token_hls and not cached.get("embed_player_url")):
+    if cached and isinstance(cached, dict):
+        is_yt = cached.get("ytFlag") == 1 or (cached.get("video_id") and len(str(cached.get("video_id"))) == 11)
+        if is_yt:
             return jsonify(cached)
-        # For Appx streams, tokens must be warmed fresh or validated below
+        # Check if stream token is within 3 hour TTL (10800s)
+        cached_at = cached.get("cached_at", 0)
+        has_stream = bool(cached.get("hls_url") or cached.get("embed_player_url") or cached.get("video_id"))
+        if has_stream and (time.time() - cached_at < 10800):
+            return jsonify(cached)
 
     def _resolve_video():
         hls_stream = ""
@@ -236,9 +239,10 @@ def api_batch_video(course_id, video_id):
             "debug": debug_collected
         }
 
-        # Cache static playable streams (YouTube and unexpiring direct HLS), but never cache expiring Appx tokens permanently
-        is_token_stream = "appx-hls" in (final_hls or "") or "token=" in (final_hls or "")
-        if yt_id or (final_hls and not is_token_stream and not embed_player_url):
+        # Cache playable streams: YouTube is permanent, Appx streams valid for 3 hours
+        is_playable = bool(yt_id or final_hls or embed_player_url)
+        if is_playable:
+            res_payload["cached_at"] = time.time()
             save_cached_video(effective_id, video_id, res_payload)
 
         return res_payload
