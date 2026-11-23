@@ -139,7 +139,7 @@ def api_batch_video(course_id, video_id):
                             if p_url:
                                 pdf_url, pdf_key, is_enc_pdf = p_url, p_k, p_enc
 
-                            # A. Check encrypted_links for direct CDN HLS m3u8 (Primary & most stable)
+                            # A. Check encrypted_links: only non-DRM streams can be played via raw HLS.js
                             enc_links = data.get("encrypted_links", [])
                             if enc_links and isinstance(enc_links, list):
                                 for el in enc_links:
@@ -147,7 +147,7 @@ def api_batch_video(course_id, video_id):
                                     first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
                                     if first_path:
                                         dec_stream = decrypt_val(first_path)
-                                        if ".m3u8" in dec_stream.lower():
+                                        if ".m3u8" in dec_stream.lower() and "/hls-drm-" not in dec_stream.lower():
                                             if not hls_stream:
                                                 hls_stream = dec_stream
                                             q_url = f"/api/proxy-hls?url={requests.utils.quote(dec_stream)}" if "classx.co.in" in dec_stream else dec_stream
@@ -156,11 +156,13 @@ def api_batch_video(course_id, video_id):
 
                             # B. Check direct file_link or recording_hls or video_id
                             if not hls_stream and data.get("recording_hls"):
-                                hls_stream = data.get("recording_hls")
+                                rec_hls = data.get("recording_hls")
+                                if "/hls-drm-" not in rec_hls.lower():
+                                    hls_stream = rec_hls
                             raw_link = data.get("file_link") or data.get("video_id") or ""
                             if raw_link:
                                 dec = decrypt_val(raw_link)
-                                if ".m3u8" in dec.lower():
+                                if ".m3u8" in dec.lower() and "/hls-drm-" not in dec.lower():
                                     if not hls_stream:
                                         hls_stream = dec
                                 elif dec and not dec.startswith("http") and not yt_id:
@@ -172,19 +174,10 @@ def api_batch_video(course_id, video_id):
                                         yt_id = m.group(1)
                                         yt_flag = 1
 
-                            # C. Check Appx video_player_token (Fallback if no direct HLS link found)
-                            if not hls_stream and not yt_id:
-                                tok = str(data.get("video_player_token") or "").strip()
-                                if tok and tok != "1234":
-                                    warmed = warm_and_extract_appx_token(tok)
-                                    if warmed:
-                                        hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
-                                        q_map = warmed.get("qualities_map", {})
-                                        for q_lbl in ["1080p", "720p", "480p", "360p", "Auto"]:
-                                            if q_lbl in q_map:
-                                                qualities.append({"quality": q_lbl, "url": f"/api/disha/appx-hls/{q_lbl}.m3u8?token={tok}&q={q_lbl}"})
-                                    else:
-                                        embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
+                            # C. Check Appx video_player_token for DRM protected lectures
+                            tok = str(data.get("video_player_token") or "").strip()
+                            if tok and tok != "1234" and not yt_id:
+                                embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
             except Exception as ex:
                 debug_collected["primary_err"] = str(ex)
 
