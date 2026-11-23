@@ -447,34 +447,52 @@ export default function App() {
   useEffect(() => {
     fetchBatches();
 
+    // Set initial history state so phone hardware back always has a root home target
+    if (!window.history.state) {
+      window.history.replaceState({ view: 'home' }, '');
+    }
+
     const handlePopState = (e) => {
-      if (e.state) {
-        handleNativeBack(e.state);
-      }
+      const state = e.state || { view: 'home' };
+      handleNativeBack(state);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const pushHistory = (state) => {
-    window.history.pushState(state, '', window.location.pathname);
+    try {
+      window.history.pushState(state, '', window.location.pathname);
+    } catch {
+      // Fallback
+    }
   };
 
   const handleNativeBack = (state) => {
-    if (state.view === 'home') {
+    if (!state || state.view === 'home') {
       setView('home');
       setSelectedBatch(null);
       setActiveVideo(null);
-    } else if (state.view === 'batch') {
+      setFolderStack([]);
+      setFolderItems([]);
+      setOverviewData({ live_classes: [], upcoming_classes: [], recent_lectures: [] });
+    } else if (state.view === 'batch' || state.view === 'folder') {
       setView('batch');
       setActiveVideo(null);
-      if (state.folderStack && state.folderStack.length > 0) {
-        setFolderStack(state.folderStack);
-        const topFolder = state.folderStack[state.folderStack.length - 1];
-        if (topFolder) {
-          loadFolderContent(state.courseId, topFolder.id);
-        }
+      if (state.selectedBatch) {
+        setSelectedBatch(state.selectedBatch);
       }
+      const cId = state.courseId || selectedBatch?.id;
+      const stack = (state.folderStack && state.folderStack.length > 0)
+        ? state.folderStack
+        : [{ id: '-1', title: state.selectedBatch?.title || selectedBatch?.title || 'Batch' }];
+      setFolderStack(stack);
+      const topFolder = stack[stack.length - 1];
+      if (topFolder && cId) {
+        loadFolderContent(cId, topFolder.id);
+      }
+    } else if (state.view === 'player') {
+      setView('player');
     }
   };
 
@@ -501,6 +519,12 @@ export default function App() {
 
   // 2. Select Batch
   const handleSelectBatch = async (batch) => {
+    // Reset previous batch data immediately to prevent cross-batch data leak
+    setOverviewData({ live_classes: [], upcoming_classes: [], recent_lectures: [] });
+    setFolderItems([]);
+    setLoadingOverview(true);
+    setLoadingFolder(true);
+
     setSelectedBatch(batch);
     setView('batch');
     // If NCERT book batch (Batch 25), default directly to 'content'
@@ -509,15 +533,16 @@ export default function App() {
     setActiveVideo(null);
 
     // Initial folder stack begins with Root
-    setFolderStack([{ id: '-1', title: batch.title }]);
-    pushHistory({ view: 'batch', courseId: batch.id, folderStack: [{ id: '-1', title: batch.title }] });
+    const rootStack = [{ id: '-1', title: batch.title }];
+    setFolderStack(rootStack);
+    pushHistory({ view: 'batch', courseId: batch.id, selectedBatch: batch, folderStack: rootStack });
 
     // Load Overview Data
     const overviewCacheKey = `overview_${batch.id}`;
     if (cacheRef.current[overviewCacheKey]) {
       setOverviewData(cacheRef.current[overviewCacheKey]);
+      setLoadingOverview(false);
     } else {
-      setLoadingOverview(true);
       try {
         const overviewRes = await fetch(`${API_BASE_URL}/batch/${batch.id}/overview`).then(r => r.json());
         if (overviewRes && overviewRes.status === 200) {
@@ -540,18 +565,24 @@ export default function App() {
     const folderCacheKey = `folder_${courseId}_${folderId}`;
     if (cacheRef.current[folderCacheKey]) {
       setFolderItems(cacheRef.current[folderCacheKey]);
+      setLoadingFolder(false);
       return;
     }
 
     setLoadingFolder(true);
+    setFolderItems([]);
     try {
       const res = await fetch(`${API_BASE_URL}/batch/${courseId}/folders?parent_id=${folderId}`).then(r => r.json());
       if (res && res.status === 200) {
-        cacheRef.current[folderCacheKey] = res.items || [];
-        setFolderItems(res.items || []);
+        const items = res.items || [];
+        cacheRef.current[folderCacheKey] = items;
+        setFolderItems(items);
+      } else {
+        setFolderItems([]);
       }
     } catch (err) {
       console.error('Failed to load folder:', err);
+      setFolderItems([]);
     } finally {
       setLoadingFolder(false);
     }
@@ -561,30 +592,32 @@ export default function App() {
   const handleOpenFolder = (folder) => {
     const nextStack = [...folderStack, { id: folder.id, title: folder.title }];
     setFolderStack(nextStack);
-    pushHistory({ view: 'batch', courseId: selectedBatch.id, folderStack: nextStack });
+    pushHistory({ view: 'folder', courseId: selectedBatch.id, selectedBatch, folderStack: nextStack });
     loadFolderContent(selectedBatch.id, folder.id);
   };
 
-  // Back Button Action
+  // Back Button Action (Syncs cleanly with Browser / Phone History)
   const handleBack = () => {
-    if (view === 'player') {
-      // Cleanly exit player back to folder without reload
-      setView('batch');
-      setActiveVideo(null);
-      return;
-    }
-
-    if (view === 'batch') {
-      if (folderStack.length > 1) {
-        // Pop one subfolder
-        const nextStack = folderStack.slice(0, folderStack.length - 1);
-        setFolderStack(nextStack);
-        const parent = nextStack[nextStack.length - 1];
-        loadFolderContent(selectedBatch.id, parent.id);
-      } else {
-        // Return to Batches Home
-        setView('home');
-        setSelectedBatch(null);
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // Direct fallback if history stack is 1
+      if (view === 'player') {
+        setView('batch');
+        setActiveVideo(null);
+      } else if (view === 'batch') {
+        if (folderStack.length > 1) {
+          const nextStack = folderStack.slice(0, folderStack.length - 1);
+          setFolderStack(nextStack);
+          const parent = nextStack[nextStack.length - 1];
+          loadFolderContent(selectedBatch.id, parent.id);
+        } else {
+          setView('home');
+          setSelectedBatch(null);
+          setFolderStack([]);
+          setFolderItems([]);
+          setOverviewData({ live_classes: [], upcoming_classes: [], recent_lectures: [] });
+        }
       }
     }
   };
@@ -652,7 +685,7 @@ export default function App() {
     setShowSpeedMenu(false);
     setActiveVideo(playVideo);
     setView('player');
-    pushHistory({ view: 'player', videoId: playVideo.id });
+    pushHistory({ view: 'player', videoId: playVideo.id, courseId: selectedBatch?.id, selectedBatch, folderStack });
   };
 
   const activeVideoId = activeVideo?.id;
@@ -966,113 +999,127 @@ export default function App() {
               {/* ----------------- TAB: LIVE ----------------- */}
               {batchTab === 'live' && (
                 <div className="space-y-4">
-                  
-                  {/* Live Now Section (If active) */}
-                  {overviewData.live_classes && overviewData.live_classes.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
-                        <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
-                          Live Class Running Now
-                        </span>
-                      </div>
-
-                      {overviewData.live_classes.map((item) => (
-                        <div 
-                          key={item.id}
-                          onClick={() => handlePlayVideo(item)}
-                          className="bg-gradient-to-r from-red-950/30 to-[#0e0e14] border border-red-500/40 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-red-400 transition-all active:scale-[0.99]"
-                        >
-                          <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-black shrink-0">
-                            <img 
-                              src={item.thumbnail} 
-                              alt={item.title} 
-                              className="w-full h-full object-cover"
-                            />
-                            <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-red-600 text-[9px] font-black uppercase text-white tracking-widest flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                              LIVE
-                            </div>
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <h4 className="text-xs font-bold text-white line-clamp-2">
-                              {item.title}
-                            </h4>
-                            <p className="text-[10px] text-red-300 font-semibold mt-1">
-                              🔴 Watch Live Now
-                            </p>
+                  {loadingOverview ? (
+                    <div className="space-y-3">
+                      {[1, 2, 3, 4].map(n => (
+                        <div key={n} className="bg-[#0c0c0f] border border-[#1c1c22] rounded-xl p-3 flex items-center gap-3 animate-pulse">
+                          <div className="w-28 aspect-video bg-zinc-800 rounded-lg shrink-0"></div>
+                          <div className="flex-1 space-y-2">
+                            <div className="h-3.5 bg-zinc-800 rounded w-4/5"></div>
+                            <div className="h-2.5 bg-zinc-800/60 rounded w-1/3"></div>
                           </div>
                         </div>
                       ))}
                     </div>
-                  )}
-
-                  {/* Upcoming Live Section */}
-                  {overviewData.upcoming_classes && overviewData.upcoming_classes.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                          Upcoming Classes (Schedule)
-                        </span>
-                      </div>
-
-                      {overviewData.upcoming_classes.map((item) => (
-                        <div 
-                          key={item.id}
-                          onClick={() => handlePlayVideo(item)}
-                          className="bg-[#0f0e13] border border-amber-500/30 hover:border-amber-400/60 rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all active:scale-[0.99]"
-                        >
-                          <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-zinc-900 shrink-0 border border-amber-500/20">
-                            <img 
-                              src={item.thumbnail} 
-                              alt={item.title} 
-                              className="w-full h-full object-cover opacity-80"
-                            />
-                            <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-amber-500 text-[9px] font-black uppercase text-black tracking-wider flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5" />
-                              Upcoming
-                            </div>
+                  ) : (
+                    <>
+                      {/* Live Now Section (If active) */}
+                      {overviewData.live_classes && overviewData.live_classes.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                            <span className="text-xs font-bold text-red-400 uppercase tracking-wider">
+                              Live Class Running Now
+                            </span>
                           </div>
 
-                          <div className="min-w-0 flex-1">
-                            <div className="inline-block px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[9px] font-bold mb-1">
-                              {item.date || 'Scheduled'}
+                          {overviewData.live_classes.map((item) => (
+                            <div 
+                              key={item.id}
+                              onClick={() => handlePlayVideo(item)}
+                              className="bg-gradient-to-r from-red-950/30 to-[#0e0e14] border border-red-500/40 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-red-400 transition-all active:scale-[0.99]"
+                            >
+                              <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-black shrink-0 border border-red-500/30">
+                                <img 
+                                  src={item.thumbnail} 
+                                  alt={item.title} 
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    e.target.src = "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png";
+                                  }}
+                                />
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <span className="px-2 py-0.5 rounded-md bg-red-600/20 text-red-400 border border-red-500/40 text-[9px] font-bold flex items-center gap-1 tracking-wider uppercase">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                                    LIVE NOW
+                                  </span>
+                                </div>
+                                <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
+                                  {item.title}
+                                </h4>
+                                <p className="text-[10px] text-red-300 font-semibold mt-1 flex items-center gap-1">
+                                  <Play className="w-2.5 h-2.5 fill-red-400" />
+                                  Watch Live Stream
+                                </p>
+                              </div>
                             </div>
-                            <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
-                              {item.title}
-                            </h4>
-                            <p className="text-[10px] text-zinc-400 mt-1">
-                              Live broadcast will start at scheduled time
-                            </p>
-                          </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      )}
 
-                  {/* Recent Recorded Lectures */}
-                  <div className="space-y-2 pt-1">
-                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
-                      Recent Recorded Lectures
-                    </span>
-
-                    {loadingOverview ? (
-                      <div className="space-y-2">
-                        {[1, 2, 3, 4].map(n => (
-                          <div key={n} className="bg-[#0c0c0f] border border-[#1c1c22] rounded-xl p-2.5 flex items-center gap-3 animate-pulse">
-                            <div className="w-28 aspect-video bg-zinc-800 rounded-lg shrink-0"></div>
-                            <div className="flex-1 space-y-2">
-                              <div className="h-3.5 bg-zinc-800 rounded w-4/5"></div>
-                              <div className="h-2.5 bg-zinc-800/60 rounded w-1/3"></div>
-                            </div>
+                      {/* Upcoming Live Section */}
+                      {overviewData.upcoming_classes && overviewData.upcoming_classes.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                              Upcoming Classes (Schedule)
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    ) : overviewData.recent_lectures && overviewData.recent_lectures.length > 0 ? (
-                      <div className="space-y-2">
-                        {overviewData.recent_lectures.map((video) => (
+
+                          {overviewData.upcoming_classes.map((item) => (
+                            <div 
+                              key={item.id}
+                              onClick={() => handlePlayVideo(item)}
+                              className="bg-[#0f0e13] border border-amber-500/30 hover:border-amber-400/60 rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all active:scale-[0.99]"
+                            >
+                              <div className="relative w-28 aspect-video rounded-lg overflow-hidden bg-zinc-900 shrink-0 border border-white/10">
+                                <img 
+                                  src={item.thumbnail} 
+                                  alt={item.title} 
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    e.target.src = "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png";
+                                  }}
+                                />
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[9px] font-bold tracking-wider flex items-center gap-1 uppercase">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    UPCOMING
+                                  </span>
+                                  {item.date && (
+                                    <span className="text-[10px] text-zinc-400 font-medium">
+                                      {item.date}
+                                    </span>
+                                  )}
+                                </div>
+                                <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug">
+                                  {item.title}
+                                </h4>
+                                <p className="text-[10px] text-zinc-500 mt-1">
+                                  Live broadcast will start at scheduled time
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Recent Recorded Lectures */}
+                      <div className="space-y-2 pt-1">
+                        <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">
+                          Recent Recorded Lectures
+                        </span>
+
+                        {overviewData.recent_lectures && overviewData.recent_lectures.length > 0 ? (
+                          <div className="space-y-2">
+                            {overviewData.recent_lectures.map((video) => (
                           <div 
                             key={video.id}
                             onClick={() => handlePlayVideo(video)}
@@ -1111,8 +1158,10 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                </div>
+                </>
               )}
+            </div>
+          )}
 
               {/* ----------------- TAB: CONTENT ----------------- */}
               {batchTab === 'content' && (
