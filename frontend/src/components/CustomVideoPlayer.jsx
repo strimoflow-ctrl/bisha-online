@@ -92,6 +92,13 @@ export default function CustomVideoPlayer({
     const handleFsChange = () => {
       const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
       setIsFullscreen(isFs);
+      if (!isFs) {
+        try {
+          if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+          }
+        } catch (e) {}
+      }
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     document.addEventListener('webkitfullscreenchange', handleFsChange);
@@ -349,6 +356,11 @@ export default function CustomVideoPlayer({
           document.webkitExitFullscreen();
         }
         setIsFullscreen(false);
+        try {
+          if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+          }
+        } catch (e) {}
       }
     } catch (e) {
       setIsFullscreen(!isFullscreen);
@@ -438,8 +450,9 @@ export default function CustomVideoPlayer({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (document.fullscreenElement) {
-                  document.exitFullscreen().catch(() => {});
+                if (isFullscreen || document.fullscreenElement || document.webkitFullscreenElement) {
+                  toggleFullscreen();
+                  return;
                 }
                 onBack();
               }}

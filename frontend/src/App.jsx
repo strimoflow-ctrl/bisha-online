@@ -454,6 +454,22 @@ export default function App() {
     }
 
     const handlePopState = (e) => {
+      // If currently in fullscreen mode on phone, exit fullscreen and keep playing in player view
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen().catch(() => {});
+        }
+        if (window.screen?.orientation?.unlock) {
+          window.screen.orientation.unlock();
+        }
+        try {
+          window.history.pushState({ view: 'player' }, '', window.location.pathname);
+        } catch {}
+        return;
+      }
+
       const state = e.state || { view: 'home' };
       handleNativeBack(state);
     };
@@ -925,11 +941,6 @@ export default function App() {
                             e.target.src = "https://appx-content-v2.classx.co.in/subject/2026-03-06-0_8425628023565359.png";
                           }}
                         />
-                        <div className="absolute top-2.5 left-2.5">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-black/85 text-emerald-400 border border-emerald-500/30 backdrop-blur-sm">
-                            Active • Lifetime
-                          </span>
-                        </div>
                       </div>
 
                       {/* Batch Info & Enter Button */}
