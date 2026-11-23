@@ -98,7 +98,7 @@ def api_batch_overview(course_id):
     counts = {"videos": "0", "files": "0", "tests": "0"}
     try:
         r_root = make_disha_request(f"{BASE_URL}get/folder_contentsv3?course_id={effective_id}&parent_id=-1&start=0", course_id=effective_id)
-        items = r_root.json().get("data", [])
+        items = r_root.json().get("data", []) if hasattr(r_root, 'json') else []
         if items:
             root = items[0]
             root_folder_id = str(root.get("id", "-1"))
@@ -110,13 +110,24 @@ def api_batch_overview(course_id):
     except Exception as e:
         print(f"Error fetching root folder for {effective_id}: {e}")
 
-    # 2. Fetch Live & Upcoming status
+    # 2. Fetch Live & Upcoming status (Check clean_id first so crash course live items resolve accurately)
     live_classes = []
     upcoming_classes = []
     try:
-        status_url = f"{BASE_URL}get/course_contents_by_live_status?course_id={effective_id}"
-        r_status = make_disha_request(status_url, course_id=effective_id).json()
+        # Check course's own live status with start=-1&live_status=1,2
+        status_url = f"{BASE_URL}get/course_contents_by_live_status?course_id={clean_id}&start=-1&live_status=1,2"
+        r_status = make_disha_request(status_url, course_id=clean_id).json()
         status_data = r_status.get("data", {})
+        
+        # If no live/upcoming and course has an owner redirect, try fallback
+        if (not status_data.get("live") and not status_data.get("schedule") and not status_data.get("upcoming")) and effective_id != clean_id:
+            try:
+                status_url_fb = f"{BASE_URL}get/course_contents_by_live_status?course_id={effective_id}&start=-1&live_status=1,2"
+                r_status_fb = make_disha_request(status_url_fb, course_id=effective_id).json()
+                if r_status_fb.get("data"):
+                    status_data = r_status_fb["data"]
+            except Exception:
+                pass
         
         if isinstance(status_data, dict):
             for it in status_data.get("live", []):
@@ -154,7 +165,8 @@ def api_batch_overview(course_id):
                     "material_type": "VIDEO"
                 })
                 
-            for it in status_data.get("upcoming", []):
+            raw_sched = status_data.get("upcoming", []) or status_data.get("schedule", [])
+            for it in raw_sched:
                 upcoming_classes.append({
                     "id": str(it.get("id")),
                     "title": it.get("Title") or it.get("title") or "Upcoming Class",
@@ -167,7 +179,7 @@ def api_batch_overview(course_id):
                     "is_upcoming": True
                 })
     except Exception as e:
-        print(f"Error fetching live status for {effective_id}: {e}")
+        print(f"Error fetching live status for {clean_id}: {e}")
 
     # 3. Fetch Recent Recorded Lectures
     recent_lectures = []
@@ -248,8 +260,20 @@ def api_batch_folders(course_id):
 
         url = f"{BASE_URL}get/folder_contentsv3?course_id={effective_id}&parent_id={parent_id}&start=0"
         r = make_disha_request(url, course_id=effective_id)
-        data = r.json()
+        data = r.json() if hasattr(r, 'json') else {}
         raw_items = data.get("data", [])
+
+        # Auto-unwrap single Home wrapper folder if encountered
+        if len(raw_items) == 1 and str(raw_items[0].get("material_type", "")).upper() == "FOLDER":
+            inner_id = str(raw_items[0].get("id"))
+            try:
+                r_inner = make_disha_request(f"{BASE_URL}get/folder_contentsv3?course_id={effective_id}&parent_id={inner_id}&start=0", course_id=effective_id)
+                inner_data = r_inner.json().get("data", []) if hasattr(r_inner, 'json') else []
+                if inner_data:
+                    raw_items = inner_data
+                    parent_id = inner_id
+            except Exception:
+                pass
         
         items = []
         for it in raw_items:

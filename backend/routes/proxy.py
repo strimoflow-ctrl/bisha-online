@@ -624,7 +624,10 @@ def api_disha_appx_seg(name=None):
         decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
 
         # Layer 3: Unscramble Appx PES payload bitwise NOT and PTS XOR timestamps
-        clean_ts = unscramble_appx_ts(decrypted, uhs_v)
+        try:
+            clean_ts = unscramble_appx_ts(decrypted, uhs_v)
+        except Exception:
+            clean_ts = decrypted
 
         resp = Response(clean_ts, status=200, mimetype="video/mp2t")
         resp.headers["Access-Control-Allow-Origin"] = "*"

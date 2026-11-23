@@ -45,14 +45,14 @@ COURSE_OWNERS_POOL_MAP = {
     '61': ['61', '89', '59'],
     '91': ['61', '89', '59'],
     '62': ['62'],
-    '86': ['62', '86'],
+    '86': ['62'],
     '63': ['63', '69', '67'],
     '67': ['67', '57'],
-    '68': ['67', '57', '68'],
+    '68': ['67', '57'],
     '69': ['69'],
     '70': ['70', '57'],
-    '60': ['60', '70', '57'],
-    '90': ['60', '70', '57'],
+    '60': ['70', '57'],
+    '90': ['57', '70'],
     '65': ['87', '57', '58', '89', '61', '63', '67', '69', '70'],
     '26': ['57', '58', '59', '89', '61', '67', '69'],
     '27': ['59', '89', '67', '69'],
@@ -66,25 +66,22 @@ COURSE_OWNERS_POOL_MAP = {
 # Redirect crash courses to their verified parent courses
 VERIFIED_COURSE_OWNER_REDIRECT = {
     '86': '62',  # 10th Crash Course 2027 -> owned by Batch 62
-    '87': '57',  # 12th Science Hindi Crash Course -> Batch 57
     '88': '58',  # 12th Science English Crash Course -> Batch 58
-    '89': '59',  # 12th Arts Crash Course -> Batch 59
-    '90': '60',  # 12th Commerce Crash Course -> Batch 60
     '91': '61',  # 12th Scoring (Hindi & English) Crash Course -> Batch 61
     '68': '67',  # 11th Science -> Batch 67
-    '60': '60',  # 12th Commerce Full Batch
-    '70': '70',  # 11th Commerce
+    '60': '70',  # 12th Commerce -> Batch 70
+    '90': '57',  # 12th Commerce Crash Course -> Batch 57 & 70
     '19': '89',  # Spoken English -> Batch 89
     '25': '89',  # 9th Foundation -> Batch 89
     '50': '89',  # Free YouTube Classes -> Batch 89
     '85': '89',  # Disha Foundation Batch -> Batch 89
-    '26': '57',  # Basic Math
-    '27': '59',  # English Grammar
-    '65': '87',  # Hindi & Sanskrit Grammar
-    '71': '63',  # 11th Humanities
+    '26': '57',  # Basic Math -> Batch 57
+    '27': '59',  # English Grammar -> Batch 59
+    '65': '87',  # Hindi & Sanskrit Grammar -> Batch 87
+    '71': '63',  # 11th Humanities -> Batch 63
 }
 
-# Sibling Crash Course mappings (folder redirection)
+# Sibling Crash Course mappings (folder redirection for composite batches 86, 88, 91)
 SIBLING_COURSE_MAP = {
     "86": {
         "hostCourseId": "62",
@@ -92,29 +89,11 @@ SIBLING_COURSE_MAP = {
         "recordedFolderId": "116616",
         "infoFolderId": "131911",
     },
-    "87": {
-        "hostCourseId": "57",
-        "crashFolderId": "160502",
-        "recordedFolderId": "110992",
-        "infoFolderId": "122948",
-    },
     "88": {
         "hostCourseId": "58",
         "crashFolderId": "160507",
         "recordedFolderId": "110993",
         "infoFolderId": "122949",
-    },
-    "89": {
-        "hostCourseId": "59",
-        "crashFolderId": "160506",
-        "recordedFolderId": "114120",
-        "infoFolderId": "122955",
-    },
-    "90": {
-        "hostCourseId": "60",
-        "crashFolderId": "160505",
-        "recordedFolderId": "114122",
-        "infoFolderId": "122958",
     },
     "91": {
         "hostCourseId": "61",

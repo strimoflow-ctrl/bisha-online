@@ -23,6 +23,7 @@ import {
   Settings
 } from 'lucide-react';
 import Hls from 'hls.js';
+import CustomVideoPlayer from './components/CustomVideoPlayer';
 import { API_BASE_URL } from './config';
 
 export default function App() {
@@ -596,28 +597,40 @@ export default function App() {
     loadFolderContent(selectedBatch.id, folder.id);
   };
 
-  // Back Button Action (Syncs cleanly with Browser / Phone History)
+  // Back Button Action (Instant UI transition + Browser / Phone History Sync)
   const handleBack = () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      // Direct fallback if history stack is 1
-      if (view === 'player') {
-        setView('batch');
-        setActiveVideo(null);
-      } else if (view === 'batch') {
-        if (folderStack.length > 1) {
-          const nextStack = folderStack.slice(0, folderStack.length - 1);
-          setFolderStack(nextStack);
-          const parent = nextStack[nextStack.length - 1];
-          loadFolderContent(selectedBatch.id, parent.id);
-        } else {
-          setView('home');
-          setSelectedBatch(null);
-          setFolderStack([]);
-          setFolderItems([]);
-          setOverviewData({ live_classes: [], upcoming_classes: [], recent_lectures: [] });
+    if (view === 'player') {
+      setView('batch');
+      setActiveVideo(null);
+      try {
+        if (window.history.state?.view === 'player') {
+          window.history.back();
         }
+      } catch (e) {}
+      return;
+    }
+    if (view === 'batch') {
+      if (folderStack.length > 1) {
+        const nextStack = folderStack.slice(0, folderStack.length - 1);
+        setFolderStack(nextStack);
+        const parent = nextStack[nextStack.length - 1];
+        if (selectedBatch?.id && parent) {
+          loadFolderContent(selectedBatch.id, parent.id);
+        }
+        try {
+          if (window.history.state?.view === 'folder') {
+            window.history.back();
+          }
+        } catch (e) {}
+      } else {
+        setView('home');
+        setSelectedBatch(null);
+        setFolderStack([]);
+        setFolderItems([]);
+        setOverviewData({ live_classes: [], upcoming_classes: [], recent_lectures: [] });
+        try {
+          window.history.replaceState({ view: 'home' }, '');
+        } catch (e) {}
       }
     }
   };
@@ -1412,125 +1425,16 @@ export default function App() {
                 {/* 16:9 Cinema Player Screen (Full Landscape Capable) */}
                 <div 
                   ref={playerContainerRef}
-                  className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-[#1e1e24] shadow-2xl flex items-center justify-center group"
+                  className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-[#1e1e24] shadow-2xl flex items-center justify-center"
                 >
-                  {/* Floating Exit Fullscreen Button when in Fullscreen */}
-                  {isFullscreen && (
-                    <button 
-                      onClick={toggleFullscreen}
-                      className="absolute top-3 right-3 z-50 bg-black/85 hover:bg-black border border-zinc-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xl backdrop-blur-md active:scale-95 transition-all"
-                    >
-                      <Minimize2 className="w-4 h-4 text-amber-400" />
-                      Exit Fullscreen
-                    </button>
-                  )}
-
                   {isHls ? (
-                    <div className="relative w-full h-full flex items-center justify-center bg-black group">
-                      <video 
-                        ref={videoRef}
-                        autoPlay 
-                        playsInline
-                        controls
-                        className="w-full h-full object-contain pointer-events-auto"
-                        onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
-                        onLoadedMetadata={(e) => setDuration(e.target.duration || 0)}
-                        onPlay={() => setIsPlaying(true)}
-                        onPause={() => setIsPlaying(false)}
-                      />
-
-                      {/* Top Right Controls Overlay for HLS Player */}
-                      {(() => {
-                        const tokenMatch = (activeVideo?.hls_url || '').match(/token=([a-zA-Z0-9_-]+)/);
-                        const detectedToken = tokenMatch ? tokenMatch[1] : null;
-                        const availableQualities = (activeVideo?.qualities && activeVideo.qualities.length > 0)
-                          ? activeVideo.qualities
-                          : detectedToken
-                            ? [
-                                { quality: 'Auto', url: `/api/disha/appx-hls/master.m3u8?token=${detectedToken}` },
-                                { quality: '720p', url: `/api/disha/appx-hls/720p.m3u8?token=${detectedToken}&q=720p` },
-                                { quality: '480p', url: `/api/disha/appx-hls/480p.m3u8?token=${detectedToken}&q=480p` },
-                                { quality: '360p', url: `/api/disha/appx-hls/360p.m3u8?token=${detectedToken}&q=360p` }
-                              ]
-                            : [];
-
-                        return (
-                          <div className="absolute top-2.5 right-2.5 z-30 flex items-center gap-1.5 pointer-events-auto">
-                            {availableQualities.length > 0 && (
-                              <div className="relative">
-                                <button
-                                  onClick={() => { setShowQualityMenu(!showQualityMenu); setShowSpeedMenu(false); }}
-                                  className="px-2.5 py-1 rounded-md bg-black/80 hover:bg-black text-white border border-white/20 text-[11px] font-bold flex items-center gap-1 shadow-lg backdrop-blur transition-all active:scale-95 cursor-pointer"
-                                  title="Quality Switcher"
-                                >
-                                  <Settings className="w-3 h-3 text-emerald-400" />
-                                  <span>{selectedQuality}</span>
-                                </button>
-
-                                {showQualityMenu && (
-                                  <div className="absolute right-0 top-full mt-1.5 w-28 bg-[#121217] border border-[#2b2b36] rounded-lg shadow-2xl py-1 z-40 overflow-hidden backdrop-blur-md">
-                                    <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-400 border-b border-zinc-800">
-                                      Quality
-                                    </div>
-                                    {availableQualities.map((q) => (
-                                      <button
-                                        key={q.quality}
-                                        onClick={() => switchQuality(q)}
-                                        className={`w-full text-left px-2.5 py-1.5 text-xs font-semibold flex items-center justify-between transition-colors ${
-                                          selectedQuality === q.quality
-                                            ? 'bg-emerald-500/20 text-emerald-400'
-                                            : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
-                                        }`}
-                                      >
-                                        <span>{q.quality}</span>
-                                        {selectedQuality === q.quality && <Check className="w-3 h-3 text-emerald-400" />}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Speed Selector */}
-                            <div className="relative">
-                              <button
-                                onClick={() => { setShowSpeedMenu(!showSpeedMenu); setShowQualityMenu(false); }}
-                                className="px-2.5 py-1 rounded-md bg-black/80 hover:bg-black text-white border border-white/20 text-[11px] font-bold flex items-center gap-1 shadow-lg backdrop-blur transition-all active:scale-95 cursor-pointer"
-                                title="Playback Speed"
-                              >
-                                <Gauge className="w-3 h-3 text-cyan-400" />
-                                <span>{playbackSpeed}x</span>
-                              </button>
-
-                              {showSpeedMenu && (
-                                <div className="absolute right-0 top-full mt-1.5 w-24 bg-[#121217] border border-[#2b2b36] rounded-lg shadow-2xl py-1 z-40 overflow-hidden backdrop-blur-md">
-                                  <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-400 border-b border-zinc-800">
-                                    Speed
-                                  </div>
-                                  {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
-                                    <button
-                                      key={rate}
-                                      onClick={() => {
-                                        changeSpeed(rate);
-                                        setShowSpeedMenu(false);
-                                      }}
-                                      className={`w-full text-left px-2.5 py-1.5 text-xs font-semibold flex items-center justify-between transition-colors ${
-                                        playbackSpeed === rate
-                                          ? 'bg-cyan-500/20 text-cyan-400'
-                                          : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
-                                      }`}
-                                    >
-                                      <span>{rate}x</span>
-                                      {playbackSpeed === rate && <Check className="w-3 h-3 text-cyan-400" />}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
+                    <CustomVideoPlayer 
+                      src={activeVideo.hls_url || activeVideo.video_id}
+                      qualities={activeVideo.qualities || []}
+                      title={activeVideo.title}
+                      onBack={handleBack}
+                      autoPlay={true}
+                    />
                   ) : activeVideo.embed_player_url ? (
                     <div className="relative w-full h-full flex items-center justify-center bg-black">
                       <iframe 
