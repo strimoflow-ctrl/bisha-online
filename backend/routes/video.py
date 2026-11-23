@@ -1,7 +1,7 @@
 import re
 import requests
 from flask import Blueprint, jsonify, request
-from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT
+from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT, CLOUDFLARE_WORKER_URL
 from crypto_utils import decrypt_val, extract_pdf_from_raw
 from disha_client import make_disha_request
 from appx_hls import APPX_PLAY_ORIGIN, warm_and_extract_appx_token
@@ -215,8 +215,8 @@ def api_batch_video(course_id, video_id):
                 yt_flag = 1
 
         final_hls = hls_stream
-        if hls_stream and hls_stream.startswith("http") and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream):
-            final_hls = f"/api/proxy-hls?url={requests.utils.quote(hls_stream)}"
+        if hls_stream and hls_stream.startswith("http") and ("transcoded-videos.classx.co.in" in hls_stream or "classx.co.in" in hls_stream or "cloud-front.in" in hls_stream):
+            final_hls = f"{CLOUDFLARE_WORKER_URL}/?url={requests.utils.quote(hls_stream)}"
 
         player_type = "youtube" if yt_id else ("embed" if embed_player_url else ("hls" if final_hls else ""))
 

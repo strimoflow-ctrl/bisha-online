@@ -23,6 +23,9 @@ DISHA_ACCOUNT_POOL_ENV = os.environ.get("DISHA_ACCOUNT_POOL", "")
 # Server Port
 PORT = int(os.environ.get("PORT", 5000))
 
+# Cloudflare Edge Streamer (Unlimited Free Bandwidth for HLS Video & PDF Decryption)
+CLOUDFLARE_WORKER_URL = os.environ.get("CLOUDFLARE_WORKER_URL", "https://disha-stream.pankajkushwaha20093.workers.dev")
+
 # Firebase Integration (Optional - REST API mode for 0 dependency requirements)
 FIREBASE_DATABASE_URL = os.environ.get("FIREBASE_DATABASE_URL", "").rstrip("/")
 FIREBASE_DATABASE_SECRET = os.environ.get("FIREBASE_DATABASE_SECRET", "")

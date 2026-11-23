@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import Hls from 'hls.js';
 import CustomVideoPlayer from './components/CustomVideoPlayer';
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, CLOUDFLARE_WORKER_URL } from './config';
 
 export default function App() {
   // Navigation state:
@@ -400,11 +400,11 @@ export default function App() {
 
 
 
-  // Smart PDF Opener
+  // Smart PDF Opener (Powered by Cloudflare Edge - 0 Render Bandwidth)
   const handleDownloadPdf = (url, key = '') => {
     if (!url) return;
     const keyParam = key ? `&k=${encodeURIComponent(key)}` : '';
-    window.open(`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(url)}${keyParam}`, '_blank');
+    window.open(`${CLOUDFLARE_WORKER_URL}/?url=${encodeURIComponent(url)}${keyParam}`, '_blank');
   };
 
   // Speed Controller

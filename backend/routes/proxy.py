@@ -3,7 +3,8 @@ import json
 import base64
 import requests
 from urllib.parse import urlparse, urljoin, quote, unquote
-from flask import Blueprint, Response, request, jsonify
+from flask import Blueprint, Response, request, jsonify, redirect
+from config import CLOUDFLARE_WORKER_URL
 from crypto_utils import decrypt_xor28_pdf, is_allowed_media_url
 from .shim_data import SHIM_TEMPLATE
 from appx_hls import (
@@ -321,10 +322,13 @@ def proxy_media_segment(subpath):
 
 @proxy_bp.route("/api/proxy-hls", methods=["GET"])
 def proxy_hls():
-    """Proxies direct HLS .m3u8 playlists and .tsc chunks with required Appx Referer headers"""
+    """Proxies direct HLS .m3u8 playlists and .tsc chunks with required Appx Referer headers via Cloudflare Edge"""
     target_url = request.args.get("url")
     if not target_url:
         return "Missing URL", 400
+
+    if CLOUDFLARE_WORKER_URL and target_url.startswith("http"):
+        return redirect(f"{CLOUDFLARE_WORKER_URL}/?url={quote(target_url)}", code=302)
 
     headers = {
         "User-Agent": BROWSER_UA,
@@ -426,6 +430,11 @@ def proxy_pdf():
         </body>
         </html>
         """, 404
+
+    # Offload 100% of PDF bandwidth to Cloudflare Edge
+    if CLOUDFLARE_WORKER_URL and target_url.startswith("http"):
+        k_param = f"&k={quote(xor_key)}" if xor_key else ""
+        return redirect(f"{CLOUDFLARE_WORKER_URL}/?url={quote(target_url)}{k_param}", code=302)
 
     headers = {
         "User-Agent": BROWSER_UA,
