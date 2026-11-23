@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT
 from crypto_utils import decrypt_val
 from disha_client import make_disha_request
+from appx_hls import APPX_PLAY_ORIGIN, warm_and_extract_appx_token
 from cache_manager import (
     get_cached_video, save_cached_video, execute_coalesced
 )
@@ -15,13 +16,15 @@ def api_batch_video(course_id, video_id):
     clean_id = str(course_id).split("_")[-1] if "_" in str(course_id) else str(course_id)
     effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId") or VERIFIED_COURSE_OWNER_REDIRECT.get(clean_id, clean_id)
 
-    # 1. Check Video Cache first (Reusable for YouTube and unexpiring HLS streams)
+    # 1. Check Video Cache first (Reusable for YouTube and unexpiring HLS streams ONLY)
     cached = get_cached_video(effective_id, video_id)
     if cached:
-        # If it's YouTube or static direct HLS stream, cache is 100% safe to reuse
-        if cached.get("ytFlag") == 1 or (cached.get("hls_url") and not cached.get("embed_player_url")):
+        is_yt = cached.get("ytFlag") == 1 or cached.get("video_id")
+        hls = cached.get("hls_url") or ""
+        is_token_hls = "appx-hls" in hls or "token=" in hls
+        if is_yt or (hls and not is_token_hls and not cached.get("embed_player_url")):
             return jsonify(cached)
-        # Appx embed_player_url uses single-use tokens, so we resolve fresh token below
+        # For Appx streams, tokens must be warmed fresh or validated below
 
     def _resolve_video():
         hls_stream = ""
@@ -63,7 +66,11 @@ def api_batch_video(course_id, video_id):
                         # A. Check Appx video_player_token
                         tok = str(data.get("video_player_token") or "").strip()
                         if tok and tok != "1234":
-                            hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                            warmed = warm_and_extract_appx_token(tok)
+                            if warmed:
+                                hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                            else:
+                                embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
 
                         # B. Check direct file_link or video_id
                         raw_link = data.get("file_link") or data.get("video_id") or ""
@@ -136,8 +143,9 @@ def api_batch_video(course_id, video_id):
             "debug": debug_collected
         }
 
-        # Cache static playable streams (YouTube and unexpiring HLS), but avoid caching single-use tokens permanently
-        if yt_id or (final_hls and not embed_player_url):
+        # Cache static playable streams (YouTube and unexpiring direct HLS), but never cache expiring Appx tokens permanently
+        is_token_stream = "appx-hls" in (final_hls or "") or "token=" in (final_hls or "")
+        if yt_id or (final_hls and not is_token_stream and not embed_player_url):
             save_cached_video(effective_id, video_id, res_payload)
 
         return res_payload

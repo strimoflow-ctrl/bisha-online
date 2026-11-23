@@ -548,17 +548,27 @@ def api_disha_appx_seg(name=None):
     m_ext = re.search(r"(\.ts[a-z]?)(?:\?|$)", seg_url, re.IGNORECASE)
     ext = m_ext.group(1).lower() if m_ext else ".tsd"
 
-    is_classx_cdn = bool(re.search(r'transcoded-videos|liveclasses\.cloud-front\.in|pull-dq\.classx\.co\.in', seg_url, re.IGNORECASE))
     seg_headers = {
         "User-Agent": BROWSER_UA,
-        "Origin": "https://dishaonlineclasses.classx.co.in" if is_classx_cdn else APPX_PLAY_ORIGIN,
-        "Referer": "https://dishaonlineclasses.classx.co.in/" if is_classx_cdn else f"{APPX_PLAY_ORIGIN}/"
+        "Origin": APPX_PLAY_ORIGIN,
+        "Referer": f"{APPX_PLAY_ORIGIN}/"
     }
 
     try:
-        r = requests.get(seg_url, headers=seg_headers, timeout=25)
-        if r.status_code != 200:
-            return f"Upstream segment HTTP {r.status_code}", r.status_code
+        r = None
+        for attempt in range(2):
+            try:
+                r = requests.get(seg_url, headers=seg_headers, timeout=20)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                if attempt == 1:
+                    raise
+                time.sleep(0.3)
+
+        if not r or r.status_code != 200:
+            status_code = r.status_code if r else 502
+            return f"Upstream segment HTTP {status_code}", status_code
 
         # Layer 1: Decode wrapper (.tse, .tsa, .tsd, .tsf, etc.)
         if ext == ".ts":

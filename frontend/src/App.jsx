@@ -681,17 +681,29 @@ export default function App() {
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
               videoRef.current?.play().catch(() => {});
             });
+            let netRetries = 0;
             hls.on(Hls.Events.ERROR, (event, data) => {
               if (data.fatal) {
                 switch (data.type) {
                   case Hls.ErrorTypes.NETWORK_ERROR:
-                    hls.startLoad();
+                    netRetries++;
+                    if (netRetries <= 3) {
+                      hls.startLoad();
+                    } else {
+                      hls.destroy();
+                      if (activeVideo?.embed_player_url) {
+                        setActiveVideo(prev => ({ ...prev, hls_url: '' }));
+                      }
+                    }
                     break;
                   case Hls.ErrorTypes.MEDIA_ERROR:
                     hls.recoverMediaError();
                     break;
                   default:
                     hls.destroy();
+                    if (activeVideo?.embed_player_url) {
+                      setActiveVideo(prev => ({ ...prev, hls_url: '' }));
+                    }
                     break;
                 }
               }

@@ -54,23 +54,27 @@ def lenient_b64decode(b64_data) -> bytes:
 
 def decode_appx_segment_text(raw_input, ext: str) -> bytes:
     clean_ext = ext.lower()
-    raw_bytes = raw_input if isinstance(raw_input, (bytes, bytearray)) else raw_input.encode('latin-1', errors='ignore')
+    if isinstance(raw_input, (bytes, bytearray)):
+        text = raw_input.decode('utf-8', errors='ignore')
+    else:
+        text = str(raw_input)
+
     if clean_ext == ".tsa":
-        b64 = bytes(((b - 20) & 0xFF) for b in raw_bytes)
+        b64 = bytes(((ord(c) - 20) & 0xFF) for c in text)
         return lenient_b64decode(b64)
     if clean_ext == ".tsb":
-        b64 = bytes((((b >> 3) ^ 42) & 0xFF) for b in raw_bytes)
+        b64 = bytes((((ord(c) >> 3) ^ 42) & 0xFF) for c in text)
         return lenient_b64decode(b64)
     if clean_ext == ".tsc":
-        b64 = bytes(((b - 10) & 0xFF) for b in raw_bytes)
+        b64 = bytes(((ord(c) - 10) & 0xFF) for c in text)
         return lenient_b64decode(b64)
     if clean_ext == ".tsd":
-        b64 = bytes(((b >> 2) & 0xFF) for b in raw_bytes)
+        b64 = bytes(((ord(c) >> 2) & 0xFF) for c in text)
         return lenient_b64decode(b64)
     if clean_ext == ".tse":
-        b64 = bytes((((b ^ 42) >> 3) & 0xFF) for b in raw_bytes)
+        b64 = bytes((((ord(c) ^ 42) >> 3) & 0xFF) for c in text)
         return lenient_b64decode(b64)
-    return lenient_b64decode(raw_bytes)
+    return lenient_b64decode(text.encode('utf-8', errors='ignore'))
 
 def decode_appx_segment_binary(input_bytes: bytes, ext: str) -> bytes:
     clean_ext = ext.lower()
