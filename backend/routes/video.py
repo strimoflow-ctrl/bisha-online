@@ -1,7 +1,7 @@
 import re
 import requests
 from flask import Blueprint, jsonify, request
-from config import BASE_URL, SIBLING_COURSE_MAP
+from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT
 from crypto_utils import decrypt_val
 from disha_client import make_disha_request
 from cache_manager import (
@@ -13,7 +13,7 @@ video_bp = Blueprint("video", __name__)
 @video_bp.route("/api/batch/<course_id>/video/<video_id>", methods=["GET"])
 def api_batch_video(course_id, video_id):
     clean_id = str(course_id).split("_")[-1] if "_" in str(course_id) else str(course_id)
-    effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId", clean_id)
+    effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId") or VERIFIED_COURSE_OWNER_REDIRECT.get(clean_id, clean_id)
 
     # 1. Check Video Cache first (Reusable for YouTube and unexpiring HLS streams)
     cached = get_cached_video(effective_id, video_id)

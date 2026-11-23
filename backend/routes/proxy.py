@@ -457,6 +457,10 @@ def api_disha_appx_hls(name=None):
         "m3u8_text": entry["m3u8_text"]
     }
 
+    # Extract active_key as 32-char hex string and uhs_version
+    key_hex = active_variant["hls_key"].hex()
+    uhs_version = float(entry.get("uhs_version", 3.0) or 3.0)
+
     lines = active_variant["m3u8_text"].splitlines()
     out_lines = []
     media_sequence = 0
@@ -493,7 +497,8 @@ def api_disha_appx_hls(name=None):
             iv_for_seg = current_iv_hex or f"{media_sequence + seg_idx:032x}"
             idx_now = seg_idx
             seg_idx += 1
-            out_lines.append(f"/api/disha/appx-seg/seg-{idx_now}.ts?t={quote(token)}{q_param}&iv={iv_for_seg}&u={quote(line)}")
+            # Pass key_hex and uhs_version directly for 100% stateless multi-worker decryption
+            out_lines.append(f"/api/disha/appx-seg/seg-{idx_now}.ts?k={key_hex}&iv={iv_for_seg}&v={uhs_version}&u={quote(line)}")
             continue
 
         out_lines.append(line)
@@ -509,18 +514,35 @@ def api_disha_appx_hls(name=None):
 @proxy_bp.route("/api/disha/appx-seg", methods=["GET"])
 @proxy_bp.route("/api/disha/appx-seg/<name>", methods=["GET"])
 def api_disha_appx_seg(name=None):
+    key_hex = request.args.get("k", "").strip()
     token = request.args.get("t", "").strip()
     requested_q = request.args.get("q", "").strip()
     iv_hex = request.args.get("iv", "").strip()
     seg_url = request.args.get("u", "").strip()
-    if not token or not seg_url:
+
+    try:
+        uhs_v = float(request.args.get("v", 3.0) or 3.0)
+    except Exception:
+        uhs_v = 3.0
+
+    if not seg_url:
         return "Invalid segment parameters", 400
 
-    entry = warm_and_extract_appx_token(token)
-    if not entry:
-        return "Token session not found", 404
+    # Primary: stateless key passed in URL (works across all Gunicorn workers without shared cache)
+    if key_hex and len(key_hex) == 32:
+        try:
+            active_key = bytes.fromhex(key_hex)
+        except Exception:
+            return "Invalid key hex", 400
+    elif token:
+        entry = warm_and_extract_appx_token(token)
+        if not entry:
+            return "Token session not found", 404
+        active_key = (requested_q and entry.get("qualities_map", {}).get(requested_q, {}).get("hls_key")) or entry["hls_key"]
+        uhs_v = float(entry.get("uhs_version", 3.0) or 3.0)
+    else:
+        return "Missing key or token", 400
 
-    active_key = (requested_q and entry.get("qualities_map", {}).get(requested_q, {}).get("hls_key")) or entry["hls_key"]
     hls_iv = bytes.fromhex(iv_hex) if (iv_hex and len(iv_hex) == 32) else (b"\x00" * 16)
 
     m_ext = re.search(r"(\.ts[a-z]?)(?:\?|$)", seg_url, re.IGNORECASE)
@@ -559,7 +581,7 @@ def api_disha_appx_seg(name=None):
         decrypted = decryptor.update(enc_bytes) + decryptor.finalize()
 
         # Layer 3: Unscramble Appx PES payload bitwise NOT and PTS XOR timestamps
-        clean_ts = unscramble_appx_ts(decrypted, entry.get("uhs_version", 3.0))
+        clean_ts = unscramble_appx_ts(decrypted, uhs_v)
 
         resp = Response(clean_ts, status=200, mimetype="video/mp2t")
         resp.headers["Access-Control-Allow-Origin"] = "*"

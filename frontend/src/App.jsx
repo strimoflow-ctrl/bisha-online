@@ -649,6 +649,10 @@ export default function App() {
     pushHistory({ view: 'player', videoId: playVideo.id });
   };
 
+  const activeVideoId = activeVideo?.id;
+  const activeHlsUrl = activeVideo?.hls_url;
+  const activeM3u8 = activeVideo?.video_id;
+
   // HLS Player Hook (Handles Live broadcasts and recorded HLS streams)
   useEffect(() => {
     if (view === 'player' && activeVideo) {
@@ -662,7 +666,15 @@ export default function App() {
           if (Hls.isSupported()) {
             const hls = new Hls({
               enableWorker: true,
-              lowLatencyMode: true
+              lowLatencyMode: false,
+              backBufferLength: 90,
+              maxBufferLength: 30,
+              maxMaxBufferLength: 60,
+              maxBufferSize: 50 * 1024 * 1024,
+              maxBufferHole: 0.5,
+              fragLoadingTimeOut: 20000,
+              fragLoadingMaxRetry: 5,
+              fragLoadingRetryDelay: 1000
             });
             hls.loadSource(hlsSource);
             hls.attachMedia(videoRef.current);
@@ -692,7 +704,7 @@ export default function App() {
         }
       }
     }
-  }, [view, activeVideo]);
+  }, [view, activeVideoId, activeHlsUrl, activeM3u8]);
 
   // Current Title for Top Bar
   const getCurrentTitle = () => {
