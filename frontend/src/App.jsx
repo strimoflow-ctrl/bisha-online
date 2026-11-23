@@ -18,7 +18,9 @@ import {
   Minimize2,
   RotateCcw,
   RotateCw,
-  Gauge
+  Gauge,
+  Check,
+  Settings
 } from 'lucide-react';
 import Hls from 'hls.js';
 import { API_BASE_URL } from './config';
@@ -55,6 +57,7 @@ export default function App() {
   const cacheRef = useRef({});
   const videoRef = useRef(null);
   const iframeRef = useRef(null);
+  const hlsRef = useRef(null);
   const playerContainerRef = useRef(null);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -62,6 +65,9 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [checkingPdf, setCheckingPdf] = useState(false);
+  const [selectedQuality, setSelectedQuality] = useState('Auto');
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   
   // Format seconds to mm:ss or hh:mm:ss
   const formatTime = (secs) => {
@@ -393,22 +399,11 @@ export default function App() {
 
 
 
-  // Smart PDF Download
-  const handleDownloadPdf = async (url) => {
+  // Smart PDF Opener
+  const handleDownloadPdf = (url, key = '') => {
     if (!url) return;
-    setCheckingPdf(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/check-pdf?url=${encodeURIComponent(url)}`).then(r => r.json());
-      if (res && res.available) {
-        window.open(`${API_BASE_URL}/proxy-pdf?url=${encodeURIComponent(url)}`, '_blank');
-      } else {
-        showToast('⚠️ इस क्लास के PDF नोट्स अभी सर्वर पर अपलोड नहीं किए गए हैं।');
-      }
-    } catch (err) {
-      window.open(`${API_BASE_URL}/proxy-pdf?url=${encodeURIComponent(url)}`, '_blank');
-    } finally {
-      setCheckingPdf(false);
-    }
+    const keyParam = key ? `&k=${encodeURIComponent(key)}` : '';
+    window.open(`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(url)}${keyParam}`, '_blank');
   };
 
   // Speed Controller
@@ -629,6 +624,13 @@ export default function App() {
           playVideo.embed_player_url = embed || playVideo.embed_player_url || '';
           playVideo.ytFlag = res.ytFlag ?? playVideo.ytFlag ?? 0;
           playVideo.player_type = res.player_type || '';
+          playVideo.qualities = res.qualities || [];
+          if (res.pdf_link) {
+            playVideo.pdf_link = res.pdf_link;
+            playVideo.pdf_key = res.pdf_key;
+            playVideo.is_pdf_encrypted = res.is_pdf_encrypted;
+            playVideo.has_notes = true;
+          }
         }
       } catch (e) {
         console.error('Failed to resolve video stream:', e);
@@ -645,6 +647,9 @@ export default function App() {
       showToast(`⚠️ Class stream is currently unavailable.`);
       return;
     }
+    setSelectedQuality('Auto');
+    setShowQualityMenu(false);
+    setShowSpeedMenu(false);
     setActiveVideo(playVideo);
     setView('player');
     pushHistory({ view: 'player', videoId: playVideo.id });
@@ -653,6 +658,36 @@ export default function App() {
   const activeVideoId = activeVideo?.id;
   const activeHlsUrl = activeVideo?.hls_url;
   const activeM3u8 = activeVideo?.video_id;
+
+  // Quality Switcher for HLS Player
+  const switchQuality = (q) => {
+    setSelectedQuality(q.quality);
+    setShowQualityMenu(false);
+    if (!videoRef.current) return;
+    const currentTimeSaved = videoRef.current.currentTime;
+    const isPausedSaved = videoRef.current.paused;
+
+    let targetUrl = q.url;
+    if (targetUrl.startsWith('/api')) {
+      const root = API_BASE_URL.replace(/\/api\/?$/, '');
+      targetUrl = `${root}${targetUrl}`;
+    }
+
+    if (hlsRef.current) {
+      hlsRef.current.loadSource(targetUrl);
+      hlsRef.current.once(Hls.Events.MANIFEST_PARSED, () => {
+        if (videoRef.current) {
+          videoRef.current.currentTime = currentTimeSaved;
+          if (!isPausedSaved) videoRef.current.play().catch(() => {});
+        }
+      });
+    } else {
+      videoRef.current.src = targetUrl;
+      videoRef.current.currentTime = currentTimeSaved;
+      if (!isPausedSaved) videoRef.current.play().catch(() => {});
+    }
+    showToast(`क्वालिटी: ${q.quality}`);
+  };
 
   // HLS Player Hook (Handles Live broadcasts and recorded HLS streams)
   useEffect(() => {
@@ -677,6 +712,7 @@ export default function App() {
               fragLoadingMaxRetry: 5,
               fragLoadingRetryDelay: 1000
             });
+            hlsRef.current = hls;
             hls.loadSource(hlsSource);
             hls.attachMedia(videoRef.current);
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -692,6 +728,7 @@ export default function App() {
                       hls.startLoad();
                     } else {
                       hls.destroy();
+                      hlsRef.current = null;
                       if (activeVideo?.embed_player_url) {
                         setActiveVideo(prev => ({ ...prev, hls_url: '' }));
                       }
@@ -702,6 +739,7 @@ export default function App() {
                     break;
                   default:
                     hls.destroy();
+                    hlsRef.current = null;
                     if (activeVideo?.embed_player_url) {
                       setActiveVideo(prev => ({ ...prev, hls_url: '' }));
                     }
@@ -709,7 +747,10 @@ export default function App() {
                 }
               }
             });
-            return () => hls.destroy();
+            return () => {
+              hls.destroy();
+              hlsRef.current = null;
+            };
           } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
             videoRef.current.src = hlsSource;
             videoRef.current.play().catch(() => {});
@@ -1218,7 +1259,7 @@ export default function App() {
 
                                   {item.has_file ? (
                                     <a 
-                                      href={`${API_BASE_URL}/proxy-pdf?url=${encodeURIComponent(item.pdf_link)}`} 
+                                      href={`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(item.pdf_link)}${item.pdf_key ? `&k=${encodeURIComponent(item.pdf_key)}` : ''}`} 
                                       target="_blank" 
                                       rel="noopener noreferrer"
                                       className="p-2 rounded-lg bg-zinc-800 text-zinc-200 hover:text-white transition-colors shrink-0"
@@ -1336,7 +1377,7 @@ export default function App() {
                   )}
 
                   {isHls ? (
-                    <div className="relative w-full h-full flex items-center justify-center bg-black">
+                    <div className="relative w-full h-full flex items-center justify-center bg-black group">
                       <video 
                         ref={videoRef}
                         autoPlay 
@@ -1348,6 +1389,98 @@ export default function App() {
                         onPlay={() => setIsPlaying(true)}
                         onPause={() => setIsPlaying(false)}
                       />
+
+                      {/* Top Right Controls Overlay for HLS Player */}
+                      {(() => {
+                        const tokenMatch = (activeVideo?.hls_url || '').match(/token=([a-zA-Z0-9_-]+)/);
+                        const detectedToken = tokenMatch ? tokenMatch[1] : null;
+                        const availableQualities = (activeVideo?.qualities && activeVideo.qualities.length > 0)
+                          ? activeVideo.qualities
+                          : detectedToken
+                            ? [
+                                { quality: 'Auto', url: `/api/disha/appx-hls/master.m3u8?token=${detectedToken}` },
+                                { quality: '720p', url: `/api/disha/appx-hls/720p.m3u8?token=${detectedToken}&q=720p` },
+                                { quality: '480p', url: `/api/disha/appx-hls/480p.m3u8?token=${detectedToken}&q=480p` },
+                                { quality: '360p', url: `/api/disha/appx-hls/360p.m3u8?token=${detectedToken}&q=360p` }
+                              ]
+                            : [];
+
+                        return (
+                          <div className="absolute top-2.5 right-2.5 z-30 flex items-center gap-1.5 pointer-events-auto">
+                            {availableQualities.length > 0 && (
+                              <div className="relative">
+                                <button
+                                  onClick={() => { setShowQualityMenu(!showQualityMenu); setShowSpeedMenu(false); }}
+                                  className="px-2.5 py-1 rounded-md bg-black/80 hover:bg-black text-white border border-white/20 text-[11px] font-bold flex items-center gap-1 shadow-lg backdrop-blur transition-all active:scale-95 cursor-pointer"
+                                  title="Quality Switcher"
+                                >
+                                  <Settings className="w-3 h-3 text-emerald-400" />
+                                  <span>{selectedQuality}</span>
+                                </button>
+
+                                {showQualityMenu && (
+                                  <div className="absolute right-0 top-full mt-1.5 w-28 bg-[#121217] border border-[#2b2b36] rounded-lg shadow-2xl py-1 z-40 overflow-hidden backdrop-blur-md">
+                                    <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-400 border-b border-zinc-800">
+                                      Quality
+                                    </div>
+                                    {availableQualities.map((q) => (
+                                      <button
+                                        key={q.quality}
+                                        onClick={() => switchQuality(q)}
+                                        className={`w-full text-left px-2.5 py-1.5 text-xs font-semibold flex items-center justify-between transition-colors ${
+                                          selectedQuality === q.quality
+                                            ? 'bg-emerald-500/20 text-emerald-400'
+                                            : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                                        }`}
+                                      >
+                                        <span>{q.quality}</span>
+                                        {selectedQuality === q.quality && <Check className="w-3 h-3 text-emerald-400" />}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Speed Selector */}
+                            <div className="relative">
+                              <button
+                                onClick={() => { setShowSpeedMenu(!showSpeedMenu); setShowQualityMenu(false); }}
+                                className="px-2.5 py-1 rounded-md bg-black/80 hover:bg-black text-white border border-white/20 text-[11px] font-bold flex items-center gap-1 shadow-lg backdrop-blur transition-all active:scale-95 cursor-pointer"
+                                title="Playback Speed"
+                              >
+                                <Gauge className="w-3 h-3 text-cyan-400" />
+                                <span>{playbackSpeed}x</span>
+                              </button>
+
+                              {showSpeedMenu && (
+                                <div className="absolute right-0 top-full mt-1.5 w-24 bg-[#121217] border border-[#2b2b36] rounded-lg shadow-2xl py-1 z-40 overflow-hidden backdrop-blur-md">
+                                  <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-zinc-400 border-b border-zinc-800">
+                                    Speed
+                                  </div>
+                                  {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
+                                    <button
+                                      key={rate}
+                                      onClick={() => {
+                                        changeSpeed(rate);
+                                        setShowSpeedMenu(false);
+                                      }}
+                                      className={`w-full text-left px-2.5 py-1.5 text-xs font-semibold flex items-center justify-between transition-colors ${
+                                        playbackSpeed === rate
+                                          ? 'bg-cyan-500/20 text-cyan-400'
+                                          : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                                      }`}
+                                    >
+                                      <span>{rate}x</span>
+                                      {playbackSpeed === rate && <Check className="w-3 h-3 text-cyan-400" />}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : activeVideo.embed_player_url ? (
                     <div className="relative w-full h-full flex items-center justify-center bg-black">
@@ -1374,120 +1507,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Custom Controls for HLS Video */}
-                {isHls && (
-                  <>
-                    {/* Timeline Progress Seekbar */}
-                    <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-3 space-y-2 shadow">
-                      <div className="flex items-center gap-3">
-                        <button 
-                          onClick={togglePlayPause}
-                          className="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center hover:bg-zinc-200 active:scale-95 transition-all shrink-0 shadow"
-                          title={isPlaying ? "Pause" : "Play"}
-                        >
-                          {isPlaying ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 fill-black ml-0.5" />}
-                        </button>
-
-                        {isLive ? (
-                          <div className="flex-1 flex items-center justify-between px-3 py-1.5 bg-red-950/30 border border-red-500/30 rounded-lg">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
-                              <span className="text-xs font-bold text-red-400 tracking-wider">
-                                🔴 LIVE STREAM
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-zinc-400 font-medium font-mono">REAL-TIME</span>
-                          </div>
-                        ) : (
-                          <div className="flex-1 flex flex-col justify-center">
-                            <input 
-                              type="range"
-                              min={0}
-                              max={duration > 0 ? duration : 100}
-                              value={currentTime}
-                              onChange={handleSeek}
-                              className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                            />
-                            <div className="flex justify-between items-center text-[10px] text-zinc-400 mt-1 font-mono">
-                              <span>{formatTime(currentTime)}</span>
-                              <span>{formatTime(duration)}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Player Quick Controls (Seek, Speed, Fullscreen) */}
-                    <div className="bg-[#0e0e13] border border-[#1e1e25] rounded-xl p-2.5 flex items-center justify-between gap-2 shadow">
-                      {isLive ? (
-                        <div className="flex items-center gap-2 px-1 text-[11px] text-zinc-400 font-medium">
-                          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 animate-ping"></span>
-                          <span>🔴 Live broadcast active in real-time</span>
-                        </div>
-                      ) : (
-                        <>
-                          {/* Seek Buttons */}
-                          <div className="flex items-center gap-1.5">
-                            <button 
-                              onClick={() => seekRelative(-10)}
-                              className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
-                              title="10s Back"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
-                              -10s
-                            </button>
-                            <button 
-                              onClick={() => seekRelative(10)}
-                              className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all"
-                              title="10s Forward"
-                            >
-                              +10s
-                              <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
-                            </button>
-                          </div>
-
-                          {/* Speed Pills */}
-                          <div className="flex items-center gap-1 bg-[#14141a] p-0.5 rounded-lg border border-[#22222a]">
-                            {[1, 1.25, 1.5, 2].map((rate) => (
-                              <button
-                                key={rate}
-                                onClick={() => changeSpeed(rate)}
-                                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
-                                  playbackSpeed === rate 
-                                    ? 'bg-white text-black shadow-sm' 
-                                    : 'text-zinc-400 hover:text-white'
-                                }`}
-                              >
-                                {rate}x
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-
-                      {/* Fullscreen Button */}
-                      <button 
-                        onClick={toggleFullscreen}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#181820] hover:bg-[#22222d] active:scale-95 text-zinc-300 hover:text-white text-[11px] font-bold flex items-center gap-1 transition-all shrink-0 ml-auto"
-                        title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-                      >
-                        {isFullscreen ? (
-                          <>
-                            <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Exit Fullscreen</span>
-                          </>
-                        ) : (
-                          <>
-                            <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="hidden sm:inline">Fullscreen</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {/* Video Info Card (Only Title, Date, and Notes Download) */}
+                {/* Video Info Card (Title, Date, and Compact Notes) */}
                 <div className="bg-[#0b0b0e] border border-[#1c1c22] rounded-xl p-3.5 space-y-3 shadow-lg">
                   <div>
                     <h2 className="text-sm font-bold text-white leading-snug">
@@ -1500,14 +1520,31 @@ export default function App() {
                   </div>
 
                   {activeVideo.has_notes && activeVideo.pdf_link && (
-                    <button 
-                      onClick={() => handleDownloadPdf(activeVideo.pdf_link)}
-                      disabled={checkingPdf}
-                      className="w-full py-2.5 px-3 rounded-lg text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 flex items-center justify-center gap-2 transition-all active:scale-[0.99] shadow cursor-pointer disabled:opacity-50"
-                    >
-                      <Download className="w-4 h-4" />
-                      {checkingPdf ? 'Checking server...' : 'Download Class Notes PDF'}
-                    </button>
+                    <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-zinc-800/80">
+                      <div className="flex items-center gap-2 text-xs text-zinc-300 font-medium truncate">
+                        <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="truncate">Class Notes PDF</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a 
+                          href={`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(activeVideo.pdf_link)}${activeVideo.pdf_key ? `&k=${encodeURIComponent(activeVideo.pdf_key)}` : ''}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95 shadow cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Open</span>
+                        </a>
+                        <a 
+                          href={`${API_BASE_URL}/proxy-pdf?u=${encodeURIComponent(activeVideo.pdf_link)}${activeVideo.pdf_key ? `&k=${encodeURIComponent(activeVideo.pdf_key)}` : ''}&download=1`}
+                          download="notes.pdf"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-all active:scale-95 shadow cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download</span>
+                        </a>
+                      </div>
+                    </div>
                   )}
                 </div>
 

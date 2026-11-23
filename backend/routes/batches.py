@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from config import BASE_URL, SIBLING_COURSE_MAP, BUILTIN_BATCH_CATALOG
-from crypto_utils import decrypt_val, sanitize_pdf_link
+from crypto_utils import decrypt_val, sanitize_pdf_link, extract_pdf_from_raw
 from disha_client import make_disha_request
 from cache_manager import (
     get_cached_batches, save_cached_batches,
@@ -186,7 +186,7 @@ def api_batch_overview(course_id):
                     for item in sorted_items:
                         if item.get("material_type") == "VIDEO":
                             dec_id = decrypt_val(item.get("file_link") or item.get("video_id") or "")
-                            clean_pdf = sanitize_pdf_link(item.get("pdf_link") or item.get("pdf_link2") or "")
+                            clean_pdf, pdf_key, is_enc = extract_pdf_from_raw(item)
                             
                             recent_lectures.append({
                                 "id": str(item.get("id")),
@@ -199,6 +199,8 @@ def api_batch_overview(course_id):
                                 "material_type": "VIDEO",
                                 "live_status": 3,
                                 "pdf_link": clean_pdf,
+                                "pdf_key": pdf_key,
+                                "is_pdf_encrypted": is_enc,
                                 "has_notes": bool(clean_pdf),
                                 "date": item.get("date_and_time") or item.get("event_date") or ""
                             })
@@ -286,7 +288,7 @@ def api_batch_folders(course_id):
                 elif len(decrypted_video_id) == 11 and not decrypted_video_id.startswith("http"):
                     yt_flag = 1
                 
-                clean_pdf = sanitize_pdf_link(it.get("pdf_link") or it.get("pdf_link2") or "")
+                clean_pdf, pdf_key, is_enc = extract_pdf_from_raw(it)
                 live_status = int(it.get("live_status", 3))
                 
                 entry["ytFlag"] = yt_flag
@@ -296,13 +298,17 @@ def api_batch_folders(course_id):
                 entry["embed_player_url"] = ""
                 entry["course_id"] = str(course_id)
                 entry["pdf_link"] = clean_pdf
+                entry["pdf_key"] = pdf_key
+                entry["is_pdf_encrypted"] = is_enc
                 entry["has_notes"] = bool(clean_pdf)
                 entry["live_status"] = live_status
                 entry["is_upcoming"] = (live_status == 2)
                 entry["duration"] = it.get("duration") or ""
             elif mtype in ["PDF", "FILE"]:
-                clean_pdf = sanitize_pdf_link(it.get("file_link") or it.get("pdf_link") or it.get("pdf_link2") or "")
+                clean_pdf, pdf_key, is_enc = extract_pdf_from_raw(it)
                 entry["pdf_link"] = clean_pdf
+                entry["pdf_key"] = pdf_key
+                entry["is_pdf_encrypted"] = is_enc
                 entry["has_file"] = bool(clean_pdf)
             elif mtype == "IMAGE":
                 entry["image_url"] = it.get("file_link") or it.get("thumbnail") or ""

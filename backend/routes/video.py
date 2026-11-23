@@ -2,7 +2,7 @@ import re
 import requests
 from flask import Blueprint, jsonify, request
 from config import BASE_URL, SIBLING_COURSE_MAP, VERIFIED_COURSE_OWNER_REDIRECT
-from crypto_utils import decrypt_val
+from crypto_utils import decrypt_val, extract_pdf_from_raw
 from disha_client import make_disha_request
 from appx_hls import APPX_PLAY_ORIGIN, warm_and_extract_appx_token
 from cache_manager import (
@@ -31,6 +31,10 @@ def api_batch_video(course_id, video_id):
         yt_id = ""
         yt_flag = 0
         embed_player_url = ""
+        qualities = []
+        pdf_url = ""
+        pdf_key = ""
+        is_enc_pdf = False
         debug_collected = {}
 
         # Step 1: Check if video is currently a live broadcast
@@ -39,6 +43,11 @@ def api_batch_video(course_id, video_id):
             r_status = make_disha_request(status_url, course_id=effective_id).json()
             for lv in r_status.get("data", {}).get("live", []):
                 if str(lv.get("id")) == str(video_id):
+                    # Check PDF notes
+                    p_url, p_k, p_enc = extract_pdf_from_raw(lv)
+                    if p_url:
+                        pdf_url, pdf_key, is_enc_pdf = p_url, p_k, p_enc
+
                     # Check encrypted livestream_links
                     live_links = lv.get("livestream_links", [])
                     if live_links and isinstance(live_links, list):
@@ -80,6 +89,10 @@ def api_batch_video(course_id, video_id):
                         warmed = warm_and_extract_appx_token(tok)
                         if warmed:
                             hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                            q_map = warmed.get("qualities_map", {})
+                            for q_lbl in ["1080p", "720p", "480p", "360p", "Auto"]:
+                                if q_lbl in q_map:
+                                    qualities.append({"quality": q_lbl, "url": f"/api/disha/appx-hls/{q_lbl}.m3u8?token={tok}&q={q_lbl}"})
                         else:
                             embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
                     break
@@ -95,12 +108,21 @@ def api_batch_video(course_id, video_id):
                     res_json = r.json()
                     data = res_json.get("data", {})
                     if isinstance(data, dict):
+                        # PDF Notes
+                        p_url, p_k, p_enc = extract_pdf_from_raw(data)
+                        if p_url:
+                            pdf_url, pdf_key, is_enc_pdf = p_url, p_k, p_enc
+
                         # A. Check Appx video_player_token
                         tok = str(data.get("video_player_token") or "").strip()
                         if tok and tok != "1234":
                             warmed = warm_and_extract_appx_token(tok)
                             if warmed:
                                 hls_stream = f"/api/disha/appx-hls/master.m3u8?token={tok}"
+                                q_map = warmed.get("qualities_map", {})
+                                for q_lbl in ["1080p", "720p", "480p", "360p", "Auto"]:
+                                    if q_lbl in q_map:
+                                        qualities.append({"quality": q_lbl, "url": f"/api/disha/appx-hls/{q_lbl}.m3u8?token={tok}&q={q_lbl}"})
                             else:
                                 embed_player_url = f"/api/disha-player?url={requests.utils.quote(f'{APPX_PLAY_ORIGIN}/combined-img-player?isMobile=true&token={tok}')}"
 
@@ -120,15 +142,20 @@ def api_batch_video(course_id, video_id):
                                     yt_id = m.group(1)
                                     yt_flag = 1
 
-                        # C. Check encrypted_links for HLS m3u8
+                        # C. Check encrypted_links for HLS m3u8 and quality variants
                         enc_links = data.get("encrypted_links", [])
                         if enc_links and isinstance(enc_links, list):
                             for el in enc_links:
+                                q_lbl = str(el.get("title") or el.get("quality") or "Video").strip()
                                 first_path = el.get("path") or el.get("backup_url") or el.get("url") or ""
                                 if first_path:
                                     dec_stream = decrypt_val(first_path)
-                                    if ".m3u8" in dec_stream.lower() and not hls_stream:
-                                        hls_stream = dec_stream
+                                    if ".m3u8" in dec_stream.lower():
+                                        if not hls_stream:
+                                            hls_stream = dec_stream
+                                        q_url = f"/api/proxy-hls?url={requests.utils.quote(dec_stream)}" if "classx.co.in" in dec_stream else dec_stream
+                                        if not any(q["url"] == q_url for q in qualities):
+                                            qualities.append({"quality": q_lbl, "url": q_url})
 
                         # D. Check recording_hls
                         if not hls_stream and data.get("recording_hls"):
@@ -155,6 +182,8 @@ def api_batch_video(course_id, video_id):
                             embed_player_url = f"/api/disha-player?url={requests.utils.quote(raw_target)}"
                         else:
                             embed_player_url = e_u
+                    if d.get("qualities") and isinstance(d.get("qualities"), list) and not qualities:
+                        qualities = d.get("qualities")
             except Exception as fb_err:
                 debug_collected["gbdoc_fallback_err"] = str(fb_err)
 
@@ -186,6 +215,11 @@ def api_batch_video(course_id, video_id):
             "embed_player_url": embed_player_url,
             "player_type": player_type,
             "ytFlag": yt_flag,
+            "qualities": qualities,
+            "pdf_link": pdf_url,
+            "pdf_key": pdf_key,
+            "is_pdf_encrypted": is_enc_pdf,
+            "has_notes": bool(pdf_url),
             "debug": debug_collected
         }
 

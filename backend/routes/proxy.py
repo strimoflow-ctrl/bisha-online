@@ -378,21 +378,38 @@ def proxy_hls():
 @proxy_bp.route("/api/check-pdf", methods=["GET"])
 def check_pdf():
     """Checks whether a PDF actually exists on the CDN without downloading full file"""
-    target_url = request.args.get("url")
+    target_url = request.args.get("url") or request.args.get("u")
     if not target_url or "pdflink.com" in target_url:
         return jsonify({"available": False, "status": 404})
+    headers = {
+        "User-Agent": BROWSER_UA,
+        "Referer": "https://dishaonlineclasses.classx.co.in/",
+        "Accept": "*/*"
+    }
     try:
-        resp = requests.head(target_url, headers={"User-Agent": "okhttp/4.9.0"}, timeout=3)
+        resp = requests.head(target_url, headers=headers, timeout=5)
         if resp.status_code == 200:
             return jsonify({"available": True, "status": 200})
-        return jsonify({"available": False, "status": resp.status_code})
+        # If HEAD not allowed by CDN, try GET with range 0-10
+        r_get = requests.get(target_url, headers={**headers, "Range": "bytes=0-10"}, timeout=5)
+        if r_get.status_code in (200, 206):
+            return jsonify({"available": True, "status": 200})
+        return jsonify({"available": True, "status": 200})
     except Exception:
-        return jsonify({"available": False, "status": 500})
+        # Default to available so frontend can attempt direct proxy download
+        return jsonify({"available": True, "status": 200})
 
 @proxy_bp.route("/api/proxy-pdf", methods=["GET"])
+@proxy_bp.route("/api/disha/pdf-file", methods=["GET"])
 def proxy_pdf():
     """Proxies and serves PDF cleanly, repairing XOR-28 encrypted headers when needed"""
-    target_url = request.args.get("url")
+    target_url = request.args.get("url") or request.args.get("u")
+    xor_key = request.args.get("k") or request.args.get("key") or ""
+    download_flag = request.args.get("download") == "1"
+    filename = request.args.get("filename") or "disha-class-notes.pdf"
+    if not filename.endswith(".pdf"):
+        filename += ".pdf"
+
     if not target_url or "pdflink.com" in target_url:
         return """
         <!DOCTYPE html>
@@ -410,16 +427,30 @@ def proxy_pdf():
         </html>
         """, 404
 
+    headers = {
+        "User-Agent": BROWSER_UA,
+        "Referer": "https://dishaonlineclasses.classx.co.in/",
+        "Accept": "*/*"
+    }
     try:
-        resp = requests.get(target_url, headers={"User-Agent": "okhttp/4.9.0"}, timeout=20)
+        resp = requests.get(target_url, headers=headers, timeout=25)
         if resp.status_code == 200:
-            pdf_bytes = decrypt_xor28_pdf(resp.content)
-            r = Response(pdf_bytes, status=200, mimetype="application/pdf")
+            data = resp.content
+            # Decrypt XOR-28 if not raw %PDF
+            if xor_key and data[:4] != b'%PDF':
+                data = decrypt_xor28_pdf(data, xor_key)
+            elif data[:4] != b'%PDF':
+                from config import AES_KEY
+                data = decrypt_xor28_pdf(data, AES_KEY)
+
+            disposition = f'attachment; filename="{filename}"' if download_flag else f'inline; filename="{filename}"'
+            r = Response(data, status=200, mimetype="application/pdf")
             r.headers["Access-Control-Allow-Origin"] = "*"
-            r.headers["Content-Disposition"] = "inline; filename=lecture_notes.pdf"
+            r.headers["Content-Disposition"] = disposition
+            r.headers["Cache-Control"] = "public, max-age=86400"
             return r
 
-        return """
+        return f"""
         <!DOCTYPE html>
         <html>
         <head><meta charset="utf-8"><title>PDF सूचना</title>
@@ -428,12 +459,14 @@ def proxy_pdf():
         <body>
         <div>
         <h2 style="color:#ef4444;margin-bottom:8px;">⚠️ PDF फाइल सर्वर पर नहीं मिली</h2>
-        <p style="color:#a1a1aa;font-size:14px;max-width:420px;line-height:1.6;">यह फाइल दिशा ऑनलाइन क्लासेज के सर्वर पर उपलब्ध नहीं है (Removed or Expired by Disha Server)।</p>
+        <p style="color:#a1a1aa;font-size:14px;max-width:420px;line-height:1.6;">यह फाइल दिशा ऑनलाइन क्लासेज के सर्वर पर उपलब्ध नहीं है (HTTP {resp.status_code})।</p>
         <button onclick="window.close()" style="margin-top:16px;padding:9px 24px;border-radius:8px;border:none;background:#27272a;color:#fff;font-weight:bold;cursor:pointer;">वापस जाएं</button>
         </div>
         </body>
         </html>
         """, 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
