@@ -2,4 +2,4 @@
 const rawUrl = import.meta.env.VITE_API_URL || 'https://disha-pro-backend.onrender.com/api';
 const cleanUrl = rawUrl.replace(/\/+$/, '');
 export const API_BASE_URL = cleanUrl.endsWith('/api') ? cleanUrl : `${cleanUrl}/api`;
-export const CLOUDFLARE_WORKER_URL = "https://disha-stream.pankajkushwaha20093.workers.dev";
+export const CLOUDFLARE_WORKER_URL = "https://disha-stream.cryvex.workers.dev";
