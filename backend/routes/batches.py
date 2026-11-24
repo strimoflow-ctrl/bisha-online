@@ -5,6 +5,7 @@ from disha_client import make_disha_request
 from cache_manager import (
     get_cached_batches, save_cached_batches,
     get_cached_folder, save_cached_folder,
+    get_cached_overview, save_cached_overview,
     execute_coalesced
 )
 
@@ -92,6 +93,12 @@ def api_batches():
 def api_batch_overview(course_id):
     clean_id = str(course_id).split("_")[-1] if "_" in str(course_id) else str(course_id)
     effective_id = SIBLING_COURSE_MAP.get(clean_id, {}).get("hostCourseId", clean_id)
+    force_refresh = request.args.get("refresh") == "1"
+
+    if not force_refresh:
+        cached = get_cached_overview(clean_id) or (get_cached_overview(effective_id) if effective_id != clean_id else None)
+        if cached:
+            return jsonify(cached)
 
     # 1. Fetch Root Folder info
     root_folder_id = "-1"
@@ -223,14 +230,19 @@ def api_batch_overview(course_id):
     except Exception as e:
         print(f"Error fetching recent lectures for {effective_id}: {e}")
 
-    return jsonify({
+    result_payload = {
         "status": 200,
         "root_folder_id": root_folder_id,
         "counts": counts,
         "live_classes": live_classes,
         "upcoming_classes": upcoming_classes,
         "recent_lectures": recent_lectures
-    })
+    }
+    save_cached_overview(clean_id, result_payload)
+    if effective_id != clean_id:
+        save_cached_overview(effective_id, result_payload)
+
+    return jsonify(result_payload)
 
 @batches_bp.route("/api/batch/<course_id>/folders", methods=["GET"])
 def api_batch_folders(course_id):
@@ -244,8 +256,8 @@ def api_batch_folders(course_id):
 
     force_refresh = request.args.get("refresh") == "1"
 
-    # 1. Check Cache / Firebase (with 15-min TTL or force_refresh)
-    cached = get_cached_folder(effective_id, parent_id, force_refresh=force_refresh)
+    # 1. Check Cache / Firebase (with 24-hr TTL or force_refresh)
+    cached = get_cached_folder(clean_id, parent_id, force_refresh=force_refresh) or (get_cached_folder(effective_id, parent_id, force_refresh=force_refresh) if effective_id != clean_id else None)
     if cached and not force_refresh:
         return jsonify(cached)
 
@@ -363,7 +375,9 @@ def api_batch_folders(course_id):
 
         items.sort(key=_item_sort_key)
         res = {"status": 200, "count": len(items), "items": items}
-        save_cached_folder(effective_id, parent_id, res)
+        save_cached_folder(clean_id, parent_id, res)
+        if effective_id != clean_id:
+            save_cached_folder(effective_id, parent_id, res)
         return res
 
     try:

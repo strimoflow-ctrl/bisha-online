@@ -4,7 +4,7 @@ import time
 import threading
 import requests
 from config import (
-    VIDEO_CACHE_FILE, BATCH_CACHE_FILE, FOLDER_CACHE_FILE, APPX_VAULT_CACHE_FILE,
+    VIDEO_CACHE_FILE, BATCH_CACHE_FILE, FOLDER_CACHE_FILE, OVERVIEW_CACHE_FILE, APPX_VAULT_CACHE_FILE,
     FIREBASE_DATABASE_URL, FIREBASE_DATABASE_SECRET
 )
 
@@ -42,6 +42,15 @@ if os.path.exists(FOLDER_CACHE_FILE):
             PERSISTENT_FOLDER_CACHE = json.load(f)
     except Exception:
         PERSISTENT_FOLDER_CACHE = {}
+
+# Load persistent overview cache
+PERSISTENT_OVERVIEW_CACHE = {}
+if os.path.exists(OVERVIEW_CACHE_FILE):
+    try:
+        with open(OVERVIEW_CACHE_FILE, "r", encoding="utf-8") as f:
+            PERSISTENT_OVERVIEW_CACHE = json.load(f)
+    except Exception:
+        PERSISTENT_OVERVIEW_CACHE = {}
 
 def get_firebase_url(path: str) -> str:
     clean_path = path.lstrip("/")
@@ -140,6 +149,45 @@ def save_cached_folder(course_id: str, parent_id: str, data, push_firebase=True)
             pass
     if push_firebase:
         firebase_put(f"disha/folders/{key}", data)
+
+# ----------------- Batch Overview Cache (Ultra-Fast 0-Request Load) -----------------
+def get_cached_overview(course_id: str, force_refresh: bool = False):
+    if force_refresh:
+        return None
+    key = str(course_id).split("_")[-1]
+    now = time.time()
+    # 1. Fast in-memory / disk
+    with _CACHE_LOCK:
+        item = PERSISTENT_OVERVIEW_CACHE.get(key)
+    if item and isinstance(item, dict):
+        cached_at = item.get("_cached_at", 0)
+        # Fresh for 3 hours (10800 seconds)
+        if now - cached_at < 10800:
+            return item
+    # 2. Firebase check
+    fb_data = firebase_get(f"disha/overviews/{key}")
+    if fb_data and isinstance(fb_data, dict):
+        cached_at = fb_data.get("_cached_at", 0)
+        if now - cached_at < 10800:
+            with _CACHE_LOCK:
+                PERSISTENT_OVERVIEW_CACHE[key] = fb_data
+            return fb_data
+    return None
+
+def save_cached_overview(course_id: str, data: dict, push_firebase: bool = True):
+    if not isinstance(data, dict):
+        return
+    key = str(course_id).split("_")[-1]
+    data["_cached_at"] = time.time()
+    with _CACHE_LOCK:
+        PERSISTENT_OVERVIEW_CACHE[key] = data
+        try:
+            with open(OVERVIEW_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(PERSISTENT_OVERVIEW_CACHE, f, ensure_ascii=False)
+        except Exception:
+            pass
+    if push_firebase:
+        firebase_put(f"disha/overviews/{key}", data)
 
 # ----------------- Video Details Cache -----------------
 def get_cached_video(course_id: str, video_id: str):

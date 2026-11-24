@@ -307,6 +307,10 @@ def proxy_media_segment(subpath):
             return resp
 
         # Direct media segment or key
+        # Offload large media segment downloads to Cloudflare Edge to protect Render bandwidth and CPU
+        if CLOUDFLARE_WORKER_URL and not (".m3u8" in decoded_url.lower() or "mpegurl" in ct.lower()):
+            return redirect(f"{CLOUDFLARE_WORKER_URL}/?url={quote(decoded_url)}", code=302)
+
         def generate():
             for chunk in up_res.iter_content(chunk_size=65536):
                 if chunk:
@@ -591,6 +595,11 @@ def api_disha_appx_seg(name=None):
     m_ext = re.search(r"(\.ts[a-z]?)(?:\?|$)", seg_url, re.IGNORECASE)
     ext = m_ext.group(1).lower() if m_ext else ".tsd"
 
+    # Route through Cloudflare Worker to avoid Akamai/ClassX geographic blocks and protect Render IP
+    upstream_fetch_url = seg_url
+    if CLOUDFLARE_WORKER_URL and seg_url.startswith("http"):
+        upstream_fetch_url = f"{CLOUDFLARE_WORKER_URL}/?url={quote(seg_url)}"
+
     seg_headers = {
         "User-Agent": BROWSER_UA,
         "Origin": APPX_PLAY_ORIGIN,
@@ -601,7 +610,7 @@ def api_disha_appx_seg(name=None):
         r = None
         for attempt in range(2):
             try:
-                r = requests.get(seg_url, headers=seg_headers, timeout=20)
+                r = requests.get(upstream_fetch_url, headers=seg_headers, timeout=20)
                 if r.status_code == 200:
                     break
             except Exception:
