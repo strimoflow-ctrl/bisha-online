@@ -480,8 +480,6 @@ def proxy_pdf():
         """, 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 # ============================================================================
 # Native Appx Decrypted HLS Manifest & Stream Endpoints (Pure HTML5 Video)
